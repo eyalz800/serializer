@@ -769,14 +769,15 @@ private:
 /**
  * This archive serves as an output archive, which saves data into memory.
  * Every save operation appends data into the vector.
+ * This archive serves as an optimization around vector, use 'memory_output_archive' instead.
  */
-class memory_output_archive : public archive<memory_output_archive>
+class lazy_vector_memory_output_archive : public archive<lazy_vector_memory_output_archive>
 {
 public:
     /**
      * The base archive.
      */
-    using base = archive<memory_output_archive>;
+    using base = archive<lazy_vector_memory_output_archive>;
 
     /**
      * Declare base as friend.
@@ -788,25 +789,34 @@ public:
      */
     using saving = void;
 
+protected:
     /**
      * Constructs a memory output archive, that outputs to the given vector.
      */
-    explicit memory_output_archive(std::vector<unsigned char> & output) noexcept :
-        m_output(std::addressof(output))
+    explicit lazy_vector_memory_output_archive(std::vector<unsigned char> & output) noexcept :
+        m_output(std::addressof(output)),
+        m_size(output.size())
     {
     }
 
-private:
     /**
      * Serialize a single item - save it to the vector.
      */
     template <typename Item>
     void serialize(Item && item)
     {
-        m_output->insert(m_output->end(),
-            reinterpret_cast<const unsigned char *>(&item),
-            reinterpret_cast<const unsigned char *>(&item + 1)
-        );
+        // Increase vector size.
+        if (m_size + sizeof(item) > m_output->size()) {
+             m_output->resize((m_size + sizeof(item)) * 3 / 2);
+        }
+
+        // Copy the data to the end of the vector.
+        std::copy_n(reinterpret_cast<const unsigned char *>(std::addressof(item)),
+            sizeof(item),
+            m_output->data() + m_size);
+
+        // Increase the size.
+        m_size += sizeof(item);
     }
 
     /**
@@ -814,18 +824,79 @@ private:
      */
     void serialize(const void * data, size_type size)
     {
-        m_output->insert(m_output->end(),
-            static_cast<const unsigned char *>(data),
-            static_cast<const unsigned char *>(data) + size
-        );
+        // Increase vector size.
+        if (m_size + size > m_output->size()) {
+             m_output->resize((m_size + size) * 3 / 2);
+        }
+
+        // Copy the data to the end of the vector.
+        std::copy_n(static_cast<const unsigned char *>(data),
+            size,
+            m_output->data() + m_size);
+
+        // Increase the size.
+        m_size += size;
     }
+
+     /**
+      * Resizes the vector to the desired size.
+      */
+     void fit_vector()
+     {
+          m_output->resize(m_size);
+     }
 
 private:
     /**
      * The output vector.
      */
     std::vector<unsigned char> * m_output{};
-}; // memory_output_archive
+
+     /**
+      * The vector size.
+      */
+     std::size_t m_size{};
+}; // lazy_vector_memory_output_archive
+
+/**
+ * This archive serves as an output archive, which saves data into memory.
+ * Every save operation appends data into the vector.
+ */
+class memory_output_archive : private lazy_vector_memory_output_archive
+{
+public:
+    /**
+     * The base archive.
+     */
+    using base = lazy_vector_memory_output_archive;
+
+    /**
+     * Constructs a memory output archive, that outputs to the given vector.
+     */
+    explicit memory_output_archive(std::vector<unsigned char> & output) noexcept :
+          lazy_vector_memory_output_archive(output)
+    {
+    }
+
+    /**
+     * Saves items into the archive.
+     */
+    template <typename... Items>
+    void operator()(Items && ... items)
+     {
+          try {
+               // Serialize the items.
+               base::operator()(std::forward<Items>(items)...);
+
+               // Fit the vector.
+               fit_vector();
+          } catch (...) {
+               // Fit the vector.
+               fit_vector();
+               throw;
+          }
+     }
+};
 
 /**
  * This archive serves as the memory view input archive, which loads data from non owning memory.
@@ -1655,7 +1726,7 @@ struct archive_sequence {};
  */
 using builtin_archives = archive_sequence<
     memory_view_input_archive,
-    memory_output_archive
+    lazy_vector_memory_output_archive
 >;
 
 /**
