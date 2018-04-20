@@ -16,8 +16,10 @@
 #include <memory>
 #include <stdexcept>
 #include <mutex>
-#include <shared_mutex>
 #include <algorithm>
+#if __cplusplus > 201402L
+#include <shared_mutex>
+#endif
 
 namespace zpp
 {
@@ -1101,8 +1103,10 @@ public:
      */
     void add(id_type id, std::string type_information_string, serialization_method_t<Archive> serialization_method)
     {
+#if __cplusplus > 201402L
         // Lock the serialization method maps for write access.
         std::lock_guard<std::shared_mutex> lock(m_shared_mutex);
+#endif
         m_serialization_id_to_method.emplace(id, std::move(serialization_method));
         m_type_information_to_serialization_id.emplace(std::move(type_information_string), id);
     }
@@ -1121,8 +1125,10 @@ public:
         // Load the serialization id.
         archive(id);
 
+#if __cplusplus > 201402L
         // Lock the serialization method maps for read access.
         std::shared_lock<std::shared_mutex> lock(m_shared_mutex);
+#endif
         
         // Find the serialization method.
         auto serialization_id_to_method_pair = m_serialization_id_to_method.find(id);
@@ -1133,8 +1139,10 @@ public:
         // Fetch the serialization method.
         auto serialization_method = serialization_id_to_method_pair->second;
 
+#if __cplusplus > 201402L
         // Unlock the serialization method maps.
         lock.unlock();
+#endif
 
         // Serialize (load) the given object.
         serialization_method(archive, object);
@@ -1149,8 +1157,10 @@ public:
     >
     void serialize(Archive & archive, const polymorphic & object)
     {
+#if __cplusplus > 201402L
         // Lock the serialization method maps for read access.
         std::shared_lock<std::shared_mutex> lock(m_shared_mutex);
+#endif
 
         // Find the serialization id.
         auto type_information_to_serialization_id_pair = m_type_information_to_serialization_id.find(
@@ -1171,8 +1181,10 @@ public:
         // Fetch the serialization method.
         auto serialization_method = serialization_id_to_method_pair->second;
 
+#if __cplusplus > 201402L
         // Unlock the serialization method maps.
         lock.unlock();
+#endif
 
         // Serialize (save) the serialization id.
         archive(id);
@@ -1188,10 +1200,12 @@ private:
     registry() = default;
 
 private:
+#if __cplusplus > 201402L
     /**
      * The shared mutex that protects the maps below.
      */
     std::shared_mutex m_shared_mutex;
+#endif
 
     /**
      * A map between serialization id to method.

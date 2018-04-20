@@ -294,5 +294,7 @@ static void foobar()
 
 Requirements
 ------------
-This framework requires a fully compliant C++14 compiler, with some C++17 features, and it requires RTTI and exceptions enabled.
-One can easily overcome the RTTI requirement by using the following project: https://github.com/eyalz800/type\_info.
+This framework requires a fully compliant C++14 compiler, including RTTI and exceptions enabled.
+One can easily overcome the RTTI requirement by using the following project: https://github.com/eyalz800/type_info.
+Disclaimer: registering polymorphic types while polymorphic serialization takes place is thread safe only
+in C++17, due to inclusion of `<shared_mutex>`.
