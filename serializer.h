@@ -1606,8 +1606,11 @@ void serialize(Archive & archive, std::unique_ptr<Type> & object)
 {
     std::unique_ptr<polymorphic> loaded_type;
 
+    // Get the instance of the polymorphic registry.
+    auto & registry_instance = registry<Archive>::get_instance();
+
     // Serialize the object using the registry.
-    registry<Archive>::get_instance().template serialize(archive, loaded_type);
+    registry_instance.serialize(archive, loaded_type);
 
     try {
         // Check if the loaded type is convertible to Type.
@@ -1636,8 +1639,11 @@ void serialize(Archive & archive, const std::unique_ptr<Type> & object)
         throw attempt_to_serialize_null_pointer_error();
     }
 
+    // Get the instance of the polymorphic registry.
+    auto & registry_instance = registry<Archive>::get_instance();
+
     // Serialize the object using the registry.
-    registry<Archive>::get_instance().template serialize(archive, *object);
+    registry_instance.serialize(archive, *object);
 }
 
 /**
@@ -1725,8 +1731,11 @@ template <typename Archive, typename Type, typename...,
 >
 void serialize(Archive & archive, const polymorphic_wrapper<Type> & object)
 {
+    // Get the instance of the polymorphic registry.
+    auto & registry_instance = registry<Archive>::get_instance();
+
     // Serialize using the registry.
-    registry<Archive>::get_instance().template serialize(archive, *object);
+    registry_instance.serialize(archive, *object);
 }
 
 /**
