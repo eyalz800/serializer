@@ -715,10 +715,10 @@ private:
 
     /**
      * Serialize a single item.
-     * This overload is for integral types.
+     * This overload is for fundamental types.
      */
     template <typename Item, typename...,
-        typename = std::enable_if_t<std::is_integral<std::remove_reference_t<Item>>::value>,
+        typename = std::enable_if_t<std::is_fundamental<std::remove_reference_t<Item>>::value>,
         typename = void, typename = void
     >
     void serialize_item(Item && item)
@@ -1199,7 +1199,7 @@ void serialize(Archive & archive, const Container & container)
 }
 
 /**
- * Serialize resizable, continuous containers, of integral or enumeration types.
+ * Serialize resizable, continuous containers, of fundamental or enumeration types.
  * Operates on loading (input) archives.
  */
 template <typename Archive, typename Container, typename...,
@@ -1209,7 +1209,7 @@ template <typename Archive, typename Container, typename...,
     typename = decltype(std::declval<Container &>().resize(std::size_t())),
     typename = decltype(std::declval<Container &>().data()),
     typename = std::enable_if_t<
-        std::is_integral<typename Container::value_type>::value ||
+        std::is_fundamental<typename Container::value_type>::value ||
         std::is_enum<typename Container::value_type>::value
     >,
     typename = std::enable_if_t<std::is_base_of<
@@ -1239,7 +1239,7 @@ void serialize(Archive & archive, Container & container)
 };
 
 /**
- * Serialize resizable, continuous containers, of integral or enumeration types.
+ * Serialize resizable, continuous containers, of fundamental or enumeration types.
  * Operates on saving (output) archives.
  */
 template <typename Archive, typename Container, typename...,
@@ -1249,7 +1249,7 @@ template <typename Archive, typename Container, typename...,
     typename = decltype(std::declval<Container &>().resize(std::size_t())),
     typename = decltype(std::declval<Container &>().data()),
     typename = std::enable_if_t<
-        std::is_integral<typename Container::value_type>::value ||
+        std::is_fundamental<typename Container::value_type>::value ||
         std::is_enum<typename Container::value_type>::value
     >,
     typename = std::enable_if_t<std::is_base_of<
