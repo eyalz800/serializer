@@ -296,5 +296,4 @@ Requirements
 ------------
 This framework requires a fully compliant C++14 compiler, including RTTI and exceptions enabled.
 One can easily overcome the RTTI requirement by using the following project: https://github.com/eyalz800/type_info.
-Disclaimer: registering polymorphic types while polymorphic serialization takes place is thread safe only
-in C++17, due to inclusion of `<shared_mutex>`.
+Disclaimer: registering polymorphic types can be slower in C++14 compared to C++17 due to the use of `shared_timed_mutex` instead of `shared_mutex`.
