@@ -127,7 +127,7 @@ struct adl
     int y;
 };
 
-template <typenmae Archive>
+template <typename Archive>
 void serialize(Archive & archive, adl & adl)
 {
     archive(adl.x, adl.y);
