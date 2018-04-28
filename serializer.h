@@ -1700,11 +1700,22 @@ void serialize(Archive & archive, std::shared_ptr<Type> & object)
 {
     std::unique_ptr<polymorphic> loaded_type;
 
-    // Load the object into the unique_ptr.
-    serialize(archive, loaded_type);
+    // Get the instance of the polymorphic registry.
+    auto & registry_instance = registry<Archive>::get_instance();
 
-    // Transfer the object to the shared_ptr.
-    object.reset(loaded_type.release());
+    // Serialize the object using the registry.
+    registry_instance.serialize(archive, loaded_type);
+
+    try {
+        // Check if the loaded type is convertible to Type.
+        object.reset(&dynamic_cast<Type &>(*loaded_type));
+
+        // Release the object.
+        loaded_type.release();
+    } catch (const std::bad_cast &) {
+        // The loaded type was not convertible to Type.
+        throw polymorphic_type_mismatch_error();
+    }
 }
 
 /**
@@ -1722,8 +1733,11 @@ void serialize(Archive & archive, const std::shared_ptr<Type> & object)
         throw attempt_to_serialize_null_pointer_error();
     }
 
+    // Get the instance of the polymorphic registry.
+    auto & registry_instance = registry<Archive>::get_instance();
+
     // Serialize the object using the registry.
-    registry<Archive>::get_instance().template serialize(archive, *object);
+    registry_instance.serialize(archive, *object);
 }
 
 /**
