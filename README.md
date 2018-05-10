@@ -1,6 +1,6 @@
-serializer
-==========
-A single header standard C++ serialization framework.
+zpp serializer
+==============
+A single header only standard C++ serialization framework.
 
 Abstract
 --------
