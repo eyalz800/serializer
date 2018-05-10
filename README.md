@@ -292,6 +292,11 @@ static void foobar()
 }
 ```
 
+A Python Version
+----------------
+A compact python version of the library can be found here: https://github.com/eyalz800/zpp_serializer_py.
+You can use this library to intercommunicate with this one.
+
 Requirements
 ------------
 This framework requires a fully compliant C++14 compiler, including RTTI and exceptions enabled.
