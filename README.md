@@ -117,6 +117,9 @@ out(v);
 in(v);
 ```
 
+* On the reading end, one can use `memory_view_input_archive` that receives a pointer and size rather than
+a vector which requires ownership and memory allocation.
+
 * Serialization using argument dependent lookup is also possible:
 ```cpp
 namespace my_namespace
