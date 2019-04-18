@@ -19,6 +19,14 @@
 #include <algorithm>
 #include <shared_mutex>
 
+/**
+ * Header files that were introduced in C++17.
+ */
+#if __cplusplus > 201402L
+#include <variant>
+#include <optional>
+#endif
+
 namespace zpp
 {
 
@@ -1756,6 +1764,155 @@ void serialize(Archive & archive, const polymorphic_wrapper<Type> & object)
     // Serialize using the registry.
     registry_instance.serialize(archive, *object);
 }
+
+/**
+ * Support types introduced in c++17
+ */
+#if __cplusplus > 201402L
+namespace detail
+{
+
+/**
+ * The base function of the variant serialization helper function.
+ */
+template <typename Archive, typename Variant,
+    typename = typename Archive::loading
+>
+void serialize(Archive &, const Variant &, std::uint64_t)
+{
+}
+
+/**
+ * Serialize std::variant, operates on loading(input) archives.
+ * Enumerate on all the variant types, until the active type is
+ * reached, and serialize it.
+ */
+template <typename Archive, typename VariantItem, typename... VariantItems,
+    typename Variant, typename = typename Archive::loading
+>
+void serialize(Archive & archive, Variant & variant, std::uint64_t index)
+{
+    if (0 == index) {
+        // Create just enough storage properly aligned for one item.
+        std::aligned_storage_t<sizeof(VariantItem), alignof(VariantItem)> storage;
+
+        // Default construct the item in the storage.
+        auto item = access::placement_new<VariantItem>(std::addressof(storage));
+
+        try {
+            // Serialize the item.
+            archive(*item);
+            variant = std::move(*item);
+        } catch (...) {
+            // Destruct the item.
+            access::destruct(*item);
+            throw;
+        }
+
+        // Destruct the item.
+        access::destruct(*item);
+        return;
+    }
+
+    serialize<Archive, VariantItems...>(archive, variant, index - 1);
+}
+} // detail
+
+/**
+ * Serialize std::variant, operates on loading (input) archives.
+*/
+template <typename Archive, typename... VariantItems,
+    typename = typename Archive::loading
+>
+void serialize(Archive & archive, std::variant<VariantItems...> & variant)
+{
+    // Serialize the active variant index
+    std::uint64_t active_index;
+    archive(active_index);
+    if (active_index >= sizeof...(VariantItems)) {
+        throw out_of_range("Variant type mismatch");
+    }
+
+    // Serialize the active variant type, if one exists.
+    variant = {};
+    if (std::variant_npos != active_index) {
+        // A helper function for the variant to trigger the archive()
+        // on the active variant index.
+
+        detail::serialize<Archive, VariantItems...>(archive, variant, active_index);
+    }
+}
+
+/**
+ * Serialize std::variant, operates on saving (output) archives.
+ */
+template <typename Archive, typename... VariantItems,
+    typename = typename Archive::saving
+>
+void serialize(Archive & archive, const std::variant<VariantItems...> & variant)
+{
+    std::uint64_t variant_index = variant.index();
+
+    // Serialize the variant index, to tell which variant type was active.
+    archive(variant_index);
+
+    // Serialize the active variant type, if one exists.
+    if (std::variant_npos != variant_index) {
+        std::visit([&archive] (auto && value) {
+            archive(value);
+        }, variant);
+    }
+}
+
+/**
+ * Serialize std::optional, operates on loading (input) archives.
+ */
+template <typename Archive, typename OptionalType,
+    typename = typename Archive::loading
+>
+void serialize(Archive & archive, std::optional<OptionalType> & optional)
+{
+    optional = std::nullopt;
+
+    bool has_value;
+    archive(has_value);
+    if (has_value) {
+        // Create just enough storage properly aligned for one item.
+        std::aligned_storage_t<sizeof(OptionalType), alignof(OptionalType)> storage;
+
+        // Default construct the item in the storage.
+        auto item = access::placement_new<OptionalType>(std::addressof(storage));
+        try {
+            // Serialize the item.
+            archive(*item);
+            optional = std::move(*item);
+        } catch (...) {
+            // Destruct the item.
+            access::destruct(*item);
+            throw;
+        }
+
+        // Destruct the item.
+        access::destruct(*item);
+    }
+}
+
+/**
+ * Serialize std::optional, operates on saving (output) archives.
+ */
+template <typename Archive, typename OptionalType,
+    typename = typename Archive::saving
+>
+void serialize(Archive & archive, const std::optional<OptionalType> & optional)
+{
+    bool has_value = optional.has_value();
+
+    archive(has_value);
+    if (has_value) {
+        archive(optional.value());
+    }
+}
+#endif
 
 /**
  * A meta container that holds a sequence of archives.
