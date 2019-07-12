@@ -298,7 +298,7 @@ static void foobar()
 A Python Version
 ----------------
 A compact python version of the library can be found here: https://github.com/eyalz800/zpp_serializer_py.
-You can use this library to intercommunicate with this one.
+You can use this library to intercommunicate with this one. The python version does not support variant/optional.
 
 Requirements
 ------------

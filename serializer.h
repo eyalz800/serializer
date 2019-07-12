@@ -1,27 +1,30 @@
 #ifndef __zpp_serializer_h__
 #define __zpp_serializer_h__
 
-#include <utility>
+#include <algorithm>
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <cstddef>
-#include <vector>
+#include <initializer_list>
+#include <memory>
+#include <mutex>
+#include <new>
+#include <shared_mutex>
+#include <stdexcept>
 #include <string>
 #include <tuple>
 #include <type_traits>
-#include <array>
-#include <new>
 #include <unordered_map>
-#include <initializer_list>
-#include <memory>
-#include <stdexcept>
-#include <mutex>
-#include <algorithm>
-#include <shared_mutex>
+#include <utility>
+#include <vector>
+#if __cplusplus >= 201703L
+#include <optional>
+#include <variant>
+#endif
 
 namespace zpp
 {
-
 /**
  * Supports serialization of objects and polymorphic objects.
  * Example of non polymorphic serialization:
@@ -47,7 +50,7 @@ namespace zpp
  *     {
  *           return m_x;
  *       }
- *    
+ *
  *       int get_y() const noexcept
  *       {
  *           return m_y;
@@ -65,7 +68,7 @@ namespace zpp
  *     zpp::serializer::memory_output_archive out(data);
  *
  *     out(point(1337, 1338));
- *     
+ *
  *     point my_point;
  *     in(my_point);
  *
@@ -125,7 +128,8 @@ namespace zpp
  *
  *     virtual void print() const
  *     {
- *         std::cout << "student: " << person::get_name() << ' ' << m_university << '\n';
+ *         std::cout << "student: " << person::get_name() << ' ' <<
+ * m_university << '\n';
  *     }
  *
  * private:
@@ -135,19 +139,19 @@ namespace zpp
  * namespace
  * {
  * zpp::serializer::register_types<
- *    zpp::serializer::make_type<person, zpp::serializer::make_id("v1::person")>,
- *    zpp::serializer::make_type<student, zpp::serializer::make_id("v1::student")>
- * > _;
- * } // <anynymous namespace>
- * 
+ *    zpp::serializer::make_type<person,
+ * zpp::serializer::make_id("v1::person")>,
+ *    zpp::serializer::make_type<student,
+ * zpp::serializer::make_id("v1::student")> > _; } // <anynymous namespace>
+ *
  * static void foo()
  * {
  *     std::vector<unsigned char> data;
  *     zpp::serializer::memory_input_archive in(data);
  *     zpp::serializer::memory_output_archive out(data);
  *
- *     std::unique_ptr<person> my_person = std::make_unique<student>("1337", "1337University");
- *     out(my_person);
+ *     std::unique_ptr<person> my_person =
+ * std::make_unique<student>("1337", "1337University"); out(my_person);
  *
  *     my_person = nullptr;
  *     in(my_person);
@@ -161,8 +165,9 @@ namespace zpp
  *     zpp::serializer::memory_input_archive in(data);
  *     zpp::serializer::memory_output_archive out(data);
  *
- *     out(zpp::serializer::as_polymorphic(student("1337", "1337University")));
- *     
+ *     out(zpp::serializer::as_polymorphic(student("1337",
+ * "1337University")));
+ *
  *     std::unique_ptr<person> my_person;
  *     in(my_person);
  *
@@ -174,7 +179,6 @@ namespace serializer
 {
 namespace detail
 {
-
 /**
  * Map any sequence of types to void.
  */
@@ -192,16 +196,24 @@ using void_t = void;
  * ~~~
  */
 template <bool... bConditions>
-struct all_of : std::true_type {};
+struct all_of : std::true_type
+{
+};
 
 template <bool... bConditions>
-struct all_of<false, bConditions...> : std::false_type {};
+struct all_of<false, bConditions...> : std::false_type
+{
+};
 
 template <bool... bConditions>
-struct all_of<true, bConditions...> : all_of<bConditions...> {};
+struct all_of<true, bConditions...> : all_of<bConditions...>
+{
+};
 
 template <>
-struct all_of<true> : std::true_type {};
+struct all_of<true> : std::true_type
+{
+};
 
 /**
  * Remove const of container value_type
@@ -213,25 +225,29 @@ struct container_nonconst_value_type
 };
 
 /**
- * Same as above, except in case of std::map and std::unordered_map, and similar,
- * we also need to remove the const of the key type.
+ * Same as above, except in case of std::map and std::unordered_map, and
+ * similar, we also need to remove the const of the key type.
  */
-template <template <typename...> class Container, typename KeyType, typename MappedType, typename... ExtraTypes>
-struct container_nonconst_value_type<Container<KeyType, MappedType, ExtraTypes...>,
+template <template <typename...> class Container,
+          typename KeyType,
+          typename MappedType,
+          typename... ExtraTypes>
+struct container_nonconst_value_type<
+    Container<KeyType, MappedType, ExtraTypes...>,
     void_t<
         // Require existence of key_type.
         typename Container<KeyType, MappedType, ExtraTypes...>::key_type,
 
         // Require existence of mapped_type.
-        typename Container<KeyType, MappedType, ExtraTypes...>::mapped_type,
+        typename Container<KeyType, MappedType, ExtraTypes...>::
+            mapped_type,
 
-        // Require that the value type is a pair of const KeyType and MappedType.
+        // Require that the value type is a pair of const KeyType and
+        // MappedType.
         std::enable_if_t<std::is_same<
             std::pair<const KeyType, MappedType>,
-            typename Container<KeyType, MappedType, ExtraTypes...>::value_type
-        >::value>
-    >
->
+            typename Container<KeyType, MappedType, ExtraTypes...>::
+                value_type>::value>>>
 {
     using type = std::pair<KeyType, MappedType>;
 };
@@ -240,7 +256,8 @@ struct container_nonconst_value_type<Container<KeyType, MappedType, ExtraTypes..
  * Alias to the above.
  */
 template <typename Container>
-using container_nonconst_value_type_t = typename container_nonconst_value_type<Container>::type;
+using container_nonconst_value_type_t =
+    typename container_nonconst_value_type<Container>::type;
 
 /**
  * The serializer exception template.
@@ -253,18 +270,11 @@ public:
      * Use the constructors from the base class.
      */
     using Base::Base;
-
-    /**
-     * Constructs an exception object with empty message.
-     */
-    exception() :
-        Base(std::string{})
-    {
-    }
 };
 
 /**
- * A no operation, single byte has same representation in little/big endian.
+ * A no operation, single byte has same representation in little/big
+ * endian.
  */
 inline constexpr std::uint8_t swap_byte_order(std::uint8_t value) noexcept
 {
@@ -274,28 +284,31 @@ inline constexpr std::uint8_t swap_byte_order(std::uint8_t value) noexcept
 /**
  * Swaps the byte order of a given integer.
  */
-inline constexpr std::uint16_t swap_byte_order(std::uint16_t value) noexcept
+inline constexpr std::uint16_t
+swap_byte_order(std::uint16_t value) noexcept
 {
     return (std::uint16_t(swap_byte_order(std::uint8_t(value))) << 8) |
-        (swap_byte_order(std::uint8_t(value >> 8)));
+           (swap_byte_order(std::uint8_t(value >> 8)));
 }
 
 /**
  * Swaps the byte order of a given integer.
  */
-inline constexpr std::uint32_t swap_byte_order(std::uint32_t value) noexcept
+inline constexpr std::uint32_t
+swap_byte_order(std::uint32_t value) noexcept
 {
     return (std::uint32_t(swap_byte_order(std::uint16_t(value))) << 16) |
-        (swap_byte_order(std::uint16_t(value >> 16)));
+           (swap_byte_order(std::uint16_t(value >> 16)));
 }
 
 /**
  * Swaps the byte order of a given integer.
  */
-inline constexpr std::uint64_t swap_byte_order(std::uint64_t value) noexcept
+inline constexpr std::uint64_t
+swap_byte_order(std::uint64_t value) noexcept
 {
     return (std::uint64_t(swap_byte_order(std::uint32_t(value))) << 32) |
-        (swap_byte_order(std::uint32_t(value >> 32)));
+           (swap_byte_order(std::uint32_t(value >> 32)));
 }
 
 /**
@@ -311,24 +324,36 @@ constexpr auto rotate_left(Integer number, std::size_t count)
  * Checks if has 'data()' member function.
  */
 template <typename Type, typename = void>
-struct has_data_member_function : std::false_type {};
+struct has_data_member_function : std::false_type
+{
+};
 
 /**
  * Checks if has 'data()' member function.
  */
 template <typename Type>
-struct has_data_member_function<Type, void_t<decltype(std::declval<Type &>().data())>> : std::true_type {};
+struct has_data_member_function<
+    Type,
+    void_t<decltype(std::declval<Type &>().data())>> : std::true_type
+{
+};
 
-} // detail
+} // namespace detail
 
 /**
  * @name Exceptions
  * @{
  */
 using out_of_range = detail::exception<std::out_of_range, 0>;
-using undeclared_polymorphic_type_error = detail::exception<std::runtime_error, 1>;
-using attempt_to_serialize_null_pointer_error = detail::exception<std::logic_error, 2>;
-using polymorphic_type_mismatch_error = detail::exception<std::runtime_error, 3>;
+using undeclared_polymorphic_type_error =
+    detail::exception<std::runtime_error, 1>;
+using attempt_to_serialize_null_pointer_error =
+    detail::exception<std::logic_error, 2>;
+using polymorphic_type_mismatch_error =
+    detail::exception<std::runtime_error, 3>;
+using attempt_to_serialize_valueless_variant =
+    detail::exception<std::runtime_error, 4>;
+using variant_index_out_of_range = detail::exception<std::out_of_range, 5>;
 /**
  * @}
  */
@@ -336,14 +361,15 @@ using polymorphic_type_mismatch_error = detail::exception<std::runtime_error, 3>
 /**
  * If C++17 or greater, use shared mutex, else, use shared timed mutex.
  */
-#if __cplusplus > 201402L
+#if __cplusplus >= 201703L
 /**
  * The shared mutex type, defined to shared mutex when available.
  */
 using shared_mutex = std::shared_mutex;
 #else
 /**
- * The shared mutex type, defined to shared timed mutex when shared mutex is not available.
+ * The shared mutex type, defined to shared timed mutex when shared mutex
+ * is not available.
  */
 using shared_mutex = std::shared_timed_mutex;
 #endif
@@ -367,15 +393,16 @@ public:
 inline polymorphic::~polymorphic() = default;
 
 /**
- * Allow serialization with saving (output) archives, of objects held by reference,
- * that will be serialized as polymorphic, meaning, with leading polymorphic serialization id.
+ * Allow serialization with saving (output) archives, of objects held by
+ * reference, that will be serialized as polymorphic, meaning, with leading
+ * polymorphic serialization id.
  */
 template <typename Type>
 class polymorphic_wrapper
 {
 public:
     static_assert(std::is_base_of<polymorphic, Type>::value,
-            "The given type is not derived from polymorphic");
+                  "The given type is not derived from polymorphic");
 
     /**
      * Constructs from the given object to be serialized as polymorphic.
@@ -430,37 +457,44 @@ public:
      * Allows placement construction of types.
      */
     template <typename Item, typename... Arguments>
-    static auto placement_new(void * pAddress, Arguments && ... arguments) noexcept(
+    static auto
+    placement_new(void * pAddress, Arguments &&... arguments) noexcept(
         noexcept(Item(std::forward<Arguments>(arguments)...)))
     {
-        return ::new (pAddress) Item(std::forward<Arguments>(arguments)...);
+        return ::new (pAddress)
+            Item(std::forward<Arguments>(arguments)...);
     }
 
     /**
      * Allows dynamic construction of types.
      * This overload is for non polymorphic serialization.
      */
-    template <typename Item, typename... Arguments,
-        typename = std::enable_if_t<!std::is_base_of<polymorphic, Item>::value>
-    >
-    static auto make_unique(Arguments && ... arguments)
+    template <typename Item,
+              typename... Arguments,
+              typename = std::enable_if_t<
+                  !std::is_base_of<polymorphic, Item>::value>>
+    static auto make_unique(Arguments &&... arguments)
     {
-        // Construct the requested type, using new since constructor might be private.
-        return std::unique_ptr<Item>(new Item(std::forward<Arguments>(arguments)...));
+        // Construct the requested type, using new since constructor might
+        // be private.
+        return std::unique_ptr<Item>(
+            new Item(std::forward<Arguments>(arguments)...));
     }
 
     /**
      * Allows dynamic construction of types.
      * This overload is for polymorphic serialization.
      */
-    template <typename Item, typename... Arguments,
-        typename = std::enable_if_t<std::is_base_of<polymorphic, Item>::value>,
-        typename = void
-    >
-    static auto make_unique(Arguments && ... arguments)
+    template <typename Item,
+              typename... Arguments,
+              typename = std::enable_if_t<
+                  std::is_base_of<polymorphic, Item>::value>,
+              typename = void>
+    static auto make_unique(Arguments &&... arguments)
     {
-        // We create a deleter that will delete using the base class polymorphic which, as we declared,
-        // has a public virtual destructor.
+        // We create a deleter that will delete using the base class
+        // polymorphic which, as we declared, has a public virtual
+        // destructor.
         struct deleter
         {
             void operator()(Item * item) noexcept
@@ -469,8 +503,10 @@ public:
             }
         };
 
-        // Construct the requested type, using new since constructor might be private.
-        return std::unique_ptr<Item, deleter>(new Item(std::forward<Arguments>(arguments)...));
+        // Construct the requested type, using new since constructor might
+        // be private.
+        return std::unique_ptr<Item, deleter>(
+            new Item(std::forward<Arguments>(arguments)...));
     }
 
     /**
@@ -494,9 +530,7 @@ public:
     /**
      * Constructs the binary wrapper from pointer and count of items.
      */
-    binary(Item * items, size_type count) :
-        m_items(items),
-        m_count(count)
+    binary(Item * items, size_type count) : m_items(items), m_count(count)
     {
     }
 
@@ -533,7 +567,7 @@ private:
     /**
      * The number of items.
      */
-    size_type m_count = 0;
+    size_type m_count{};
 };
 
 /**
@@ -544,9 +578,9 @@ template <typename Item>
 binary<Item> as_binary(Item * item, size_type count)
 {
     static_assert(std::is_trivially_copyable<Item>::value,
-           "Must be trivially copyable");
-    
-    return { item, count };
+                  "Must be trivially copyable");
+
+    return {item, count};
 }
 
 /**
@@ -555,15 +589,16 @@ binary<Item> as_binary(Item * item, size_type count)
  */
 inline binary<unsigned char> as_binary(void * data, size_type size)
 {
-    return { static_cast<unsigned char *>(data), size };
+    return {static_cast<unsigned char *>(data), size};
 }
 
 /**
  * Allows serialization as binary data.
  */
-inline binary<const unsigned char> as_binary(const void * data, size_type size)
+inline binary<const unsigned char> as_binary(const void * data,
+                                             size_type size)
 {
-    return { static_cast<const unsigned char *>(data), size };
+    return {static_cast<const unsigned char *>(data), size};
 }
 
 /**
@@ -586,7 +621,7 @@ struct serialization_method<Archive, typename Archive::loading>
     /**
      * The exported type.
      */
-    using type = void(*)(Archive &, std::unique_ptr<polymorphic> &);
+    using type = void (*)(Archive &, std::unique_ptr<polymorphic> &);
 }; // serialization_method
 
 /**
@@ -603,21 +638,23 @@ struct serialization_method<Archive, typename Archive::saving>
     /**
      * The exported type.
      */
-    using type = void(*)(Archive &, const polymorphic &);
+    using type = void (*)(Archive &, const polymorphic &);
 }; // serialization_method
 
 /**
  * The serialization method type.
  */
 template <typename Archive>
-using serialization_method_t = typename serialization_method<Archive>::type;
+using serialization_method_t =
+    typename serialization_method<Archive>::type;
 
 /**
  * Make a serialization method from type and a loading (input) archive.
  */
-template <typename Archive, typename Type, typename...,
-    typename = typename Archive::loading
->
+template <typename Archive,
+          typename Type,
+          typename...,
+          typename = typename Archive::loading>
 serialization_method_t<Archive> make_serialization_method() noexcept
 {
     return [](Archive & archive, std::unique_ptr<polymorphic> & object) {
@@ -630,10 +667,11 @@ serialization_method_t<Archive> make_serialization_method() noexcept
 /**
  * Make a serialization method from type and a saving (output) archive.
  */
-template <typename Archive, typename Type, typename...,
-    typename = typename Archive::saving,
-    typename = void
->
+template <typename Archive,
+          typename Type,
+          typename...,
+          typename = typename Archive::saving,
+          typename = void>
 serialization_method_t<Archive> make_serialization_method() noexcept
 {
     return [](Archive & archive, const polymorphic & object) {
@@ -643,7 +681,8 @@ serialization_method_t<Archive> make_serialization_method() noexcept
 
 /**
  * This is the base archive of the serializer.
- * It enables saving and loading items into/from the archive, via operator().
+ * It enables saving and loading items into/from the archive, via
+ * operator().
  */
 template <typename ArchiveType>
 class archive
@@ -658,10 +697,12 @@ public:
      * Save/Load the given items into/from the archive.
      */
     template <typename... Items>
-    void operator()(Items && ... items)
+    void operator()(Items &&... items)
     {
         // Disallow serialization of pointer types.
-        static_assert(detail::all_of<!std::is_pointer<std::remove_reference_t<Items>>::value...>::value,
+        static_assert(
+            detail::all_of<!std::is_pointer<
+                std::remove_reference_t<Items>>::value...>::value,
             "Serialization of pointer types is not allowed");
 
         // Serialize the items.
@@ -684,7 +725,7 @@ private:
      * Serialize the given items, one by one.
      */
     template <typename Item, typename... Items>
-    void serialize_items(Item && first, Items && ... items)
+    void serialize_items(Item && first, Items &&... items)
     {
         // Invoke serialize_item the first item.
         serialize_item(std::forward<Item>(first));
@@ -699,15 +740,15 @@ private:
     void serialize_items()
     {
     }
-    
+
     /**
      * Serialize a single item.
      * This overload is for class type items with serialize method.
      */
-    template <typename Item, typename...,
-        typename = decltype(std::remove_reference_t<Item>::serialize(
-            std::declval<archive_type &>(), std::declval<Item &>()))
-    >
+    template <typename Item,
+              typename...,
+              typename = decltype(std::remove_reference_t<Item>::serialize(
+                  std::declval<archive_type &>(), std::declval<Item &>()))>
     void serialize_item(Item && item)
     {
         // Forward as lvalue.
@@ -718,10 +759,11 @@ private:
      * Serialize a single item.
      * This overload is for types with outer serialize method.
      */
-    template <typename Item, typename...,
-        typename = decltype(serialize(std::declval<archive_type &>(), std::declval<Item &>())),
-        typename = void
-    >
+    template <typename Item,
+              typename...,
+              typename = decltype(serialize(std::declval<archive_type &>(),
+                                            std::declval<Item &>())),
+              typename = void>
     void serialize_item(Item && item)
     {
         // Forward as lvalue.
@@ -732,10 +774,12 @@ private:
      * Serialize a single item.
      * This overload is for fundamental types.
      */
-    template <typename Item, typename...,
-        typename = std::enable_if_t<std::is_fundamental<std::remove_reference_t<Item>>::value>,
-        typename = void, typename = void
-    >
+    template <typename Item,
+              typename...,
+              typename = std::enable_if_t<std::is_fundamental<
+                  std::remove_reference_t<Item>>::value>,
+              typename = void,
+              typename = void>
     void serialize_item(Item && item)
     {
         // Forward as lvalue.
@@ -746,21 +790,26 @@ private:
      * Serialize a single item.
      * This overload is for enum classes.
      */
-    template <typename Item, typename...,
-        typename = std::enable_if_t<std::is_enum<std::remove_reference_t<Item>>::value>,
-        typename = void, typename = void, typename = void
-    >
+    template <typename Item,
+              typename...,
+              typename = std::enable_if_t<
+                  std::is_enum<std::remove_reference_t<Item>>::value>,
+              typename = void,
+              typename = void,
+              typename = void>
     void serialize_item(Item && item)
     {
-        // If the enum is const, we want the type to be a const type, else non-const.
+        // If the enum is const, we want the type to be a const type, else
+        // non-const.
         using integral_type = std::conditional_t<
             std::is_const<std::remove_reference_t<Item>>::value,
             const std::underlying_type_t<std::remove_reference_t<Item>>,
-            std::underlying_type_t<std::remove_reference_t<Item>>
-        >;
+            std::underlying_type_t<std::remove_reference_t<Item>>>;
 
         // Cast the enum to the underlying type, and forward as lvalue.
-        concrete_archive().serialize(reinterpret_cast<std::add_lvalue_reference_t<integral_type>>(item));
+        concrete_archive().serialize(
+            reinterpret_cast<std::add_lvalue_reference_t<integral_type>>(
+                item));
     }
 
     /**
@@ -784,9 +833,11 @@ private:
 /**
  * This archive serves as an output archive, which saves data into memory.
  * Every save operation appends data into the vector.
- * This archive serves as an optimization around vector, use 'memory_output_archive' instead.
+ * This archive serves as an optimization around vector, use
+ * 'memory_output_archive' instead.
  */
-class lazy_vector_memory_output_archive : public archive<lazy_vector_memory_output_archive>
+class lazy_vector_memory_output_archive
+    : public archive<lazy_vector_memory_output_archive>
 {
 public:
     /**
@@ -806,11 +857,12 @@ public:
 
 protected:
     /**
-     * Constructs a memory output archive, that outputs to the given vector.
+     * Constructs a memory output archive, that outputs to the given
+     * vector.
      */
-    explicit lazy_vector_memory_output_archive(std::vector<unsigned char> & output) noexcept :
-        m_output(std::addressof(output)),
-        m_size(output.size())
+    explicit lazy_vector_memory_output_archive(
+        std::vector<unsigned char> & output) noexcept :
+        m_output(std::addressof(output))
     {
     }
 
@@ -822,11 +874,12 @@ protected:
     {
         // Increase vector size.
         if (m_size + sizeof(item) > m_output->size()) {
-             m_output->resize((m_size + sizeof(item)) * 3 / 2);
+            m_output->resize((m_size + sizeof(item)) * 3 / 2);
         }
 
         // Copy the data to the end of the vector.
-        std::copy_n(reinterpret_cast<const unsigned char *>(std::addressof(item)),
+        std::copy_n(
+            reinterpret_cast<const unsigned char *>(std::addressof(item)),
             sizeof(item),
             m_output->data() + m_size);
 
@@ -841,25 +894,33 @@ protected:
     {
         // Increase vector size.
         if (m_size + size > m_output->size()) {
-             m_output->resize((m_size + size) * 3 / 2);
+            m_output->resize((m_size + size) * 3 / 2);
         }
 
         // Copy the data to the end of the vector.
         std::copy_n(static_cast<const unsigned char *>(data),
-            size,
-            m_output->data() + m_size);
+                    size,
+                    m_output->data() + m_size);
 
         // Increase the size.
         m_size += size;
     }
 
-     /**
-      * Resizes the vector to the desired size.
-      */
-     void fit_vector()
-     {
-          m_output->resize(m_size);
-     }
+    /**
+     * Resizes the vector to the desired size.
+     */
+    void fit_vector()
+    {
+        m_output->resize(m_size);
+    }
+
+    /**
+     * Set the size to the vector size.
+     */
+    void adjust_size()
+    {
+        m_size = m_output->size();
+    }
 
 private:
     /**
@@ -867,10 +928,10 @@ private:
      */
     std::vector<unsigned char> * m_output{};
 
-     /**
-      * The vector size.
-      */
-     std::size_t m_size{};
+    /**
+     * The vector size.
+     */
+    std::size_t m_size{};
 }; // lazy_vector_memory_output_archive
 
 /**
@@ -886,10 +947,12 @@ public:
     using base = lazy_vector_memory_output_archive;
 
     /**
-     * Constructs a memory output archive, that outputs to the given vector.
+     * Constructs a memory output archive, that outputs to the given
+     * vector.
      */
-    explicit memory_output_archive(std::vector<unsigned char> & output) noexcept :
-          lazy_vector_memory_output_archive(output)
+    explicit memory_output_archive(
+        std::vector<unsigned char> & output) noexcept :
+        lazy_vector_memory_output_archive(output)
     {
     }
 
@@ -897,25 +960,29 @@ public:
      * Saves items into the archive.
      */
     template <typename... Items>
-    void operator()(Items && ... items)
-     {
-          try {
-               // Serialize the items.
-               base::operator()(std::forward<Items>(items)...);
+    void operator()(Items &&... items)
+    {
+        // Set the size to the vector size.
+        adjust_size();
 
-               // Fit the vector.
-               fit_vector();
-          } catch (...) {
-               // Fit the vector.
-               fit_vector();
-               throw;
-          }
-     }
+        try {
+            // Serialize the items.
+            base::operator()(std::forward<Items>(items)...);
+
+            // Fit the vector.
+            fit_vector();
+        } catch (...) {
+            // Fit the vector.
+            fit_vector();
+            throw;
+        }
+    }
 };
 
 /**
- * This archive serves as the memory view input archive, which loads data from non owning memory.
- * Every load operation advances an offset to that the next data may be loaded on the next iteration.
+ * This archive serves as the memory view input archive, which loads data
+ * from non owning memory. Every load operation advances an offset to that
+ * the next data may be loaded on the next iteration.
  */
 class memory_view_input_archive : public archive<memory_view_input_archive>
 {
@@ -936,18 +1003,22 @@ public:
     using loading = void;
 
     /**
-     * Construct a memory view input archive, that loads data from an array of given pointer and size.
+     * Construct a memory view input archive, that loads data from an array
+     * of given pointer and size.
      */
-    memory_view_input_archive(const unsigned char * input, std::size_t size) noexcept :
+    memory_view_input_archive(const unsigned char * input,
+                              std::size_t size) noexcept :
         m_input(input),
         m_size(size)
     {
     }
 
     /**
-     * Construct a memory view input archive, that loads data from an array of given pointer and size.
+     * Construct a memory view input archive, that loads data from an array
+     * of given pointer and size.
      */
-    memory_view_input_archive(const char * input, std::size_t size) noexcept :
+    memory_view_input_archive(const char * input,
+                              std::size_t size) noexcept :
         m_input(reinterpret_cast<const unsigned char *>(input)),
         m_size(size)
     {
@@ -959,7 +1030,7 @@ protected:
      */
     void reset() noexcept
     {
-        m_offset = 0;
+        m_offset = {};
     }
 
     /**
@@ -969,7 +1040,7 @@ protected:
     {
         return m_offset;
     }
-    
+
     /**
      * Serialize a single item - load it from the vector.
      */
@@ -978,11 +1049,15 @@ protected:
     {
         // Verify that the vector is large enough to contain the item.
         if (m_size < (sizeof(item) + m_offset)) {
-            throw out_of_range("Input vector was not large enough to contain the requested item");
+            throw out_of_range("Input vector was not large enough to "
+                               "contain the requested item");
         }
 
         // Fetch the item from the vector.
-        std::copy_n(m_input + m_offset, sizeof(item), reinterpret_cast<unsigned char *>(std::addressof(item)));
+        std::copy_n(
+            m_input + m_offset,
+            sizeof(item),
+            reinterpret_cast<unsigned char *>(std::addressof(item)));
 
         // Increase the offset according to item size.
         m_offset += sizeof(item);
@@ -995,11 +1070,13 @@ protected:
     {
         // Verify that the vector is large enough to contain the data.
         if (m_size < (size + m_offset)) {
-            throw out_of_range("Input vector was not large enough to contain the requested item");
+            throw out_of_range("Input vector was not large enough to "
+                               "contain the requested item");
         }
 
         // Fetch the binary data from the vector.
-        std::copy_n(m_input + m_offset, size, static_cast<unsigned char *>(data));
+        std::copy_n(
+            m_input + m_offset, size, static_cast<unsigned char *>(data));
 
         // Increase the offset according to data size.
         m_offset += size;
@@ -1023,8 +1100,9 @@ private:
 }; // memory_view_input_archive
 
 /**
- * This archive serves as the memory input archive, which loads data from owning memory.
- * Every load operation erases data from the beginning of the vector.
+ * This archive serves as the memory input archive, which loads data from
+ * owning memory. Every load operation erases data from the beginning of
+ * the vector.
  */
 class memory_input_archive : private memory_view_input_archive
 {
@@ -1042,17 +1120,20 @@ public:
      * Load items from the archive.
      */
     template <typename... Items>
-    void operator()(Items && ... items)
+    void operator()(Items &&... items)
     {
         try {
             // Update the input archive.
-            static_cast<memory_view_input_archive &>(*this) = { m_input->data(), m_input->size() };
+            static_cast<memory_view_input_archive &>(*this) = {
+                m_input->data(), m_input->size()};
 
             // Load the items.
-            memory_view_input_archive::operator()(std::forward<Items>(items)...);
+            memory_view_input_archive::operator()(
+                std::forward<Items>(items)...);
         } catch (...) {
             // Erase the loaded elements.
-            m_input->erase(m_input->begin(), m_input->begin() + get_offset());
+            m_input->erase(m_input->begin(),
+                           m_input->begin() + get_offset());
 
             // Reset to offset zero.
             reset();
@@ -1074,14 +1155,15 @@ private:
 };
 
 /**
- * This class manages polymorphic type registration for serialization process.
+ * This class manages polymorphic type registration for serialization
+ * process.
  */
 template <typename Archive>
 class registry
 {
 public:
     static_assert(!std::is_reference<Archive>::value,
-        "Disallows reference type for archive in registry");
+                  "Disallows reference type for archive in registry");
 
     /**
      * Returns the global instance of the registry.
@@ -1107,50 +1189,61 @@ public:
     template <typename Type>
     void add(id_type id)
     {
-        add(id, typeid(Type).name(), make_serialization_method<Archive, Type>());
+        add(id,
+            typeid(Type).name(),
+            make_serialization_method<Archive, Type>());
     }
 
     /**
-     * Add a serialization method for a given polymorphic type information string and id.
-     * The behavior is undefined if the type isn't derived from polymorphic.
+     * Add a serialization method for a given polymorphic type information
+     * string and id. The behavior is undefined if the type isn't derived
+     * from polymorphic.
      */
-    void add(id_type id, std::string type_information_string, serialization_method_t<Archive> serialization_method)
+    void add(id_type id,
+             std::string type_information_string,
+             serialization_method_t<Archive> serialization_method)
     {
         // Lock the serialization method maps for write access.
         std::lock_guard<shared_mutex> lock(m_shared_mutex);
 
         // Add the serialization id to serialization method mapping.
-        m_serialization_id_to_method.emplace(id, std::move(serialization_method));
+        m_serialization_id_to_method.emplace(
+            id, std::move(serialization_method));
 
         // Add the type information to to serialization id mapping.
-        m_type_information_to_serialization_id.emplace(std::move(type_information_string), id);
+        m_type_information_to_serialization_id.emplace(
+            std::move(type_information_string), id);
     }
 
     /**
      * Serialize a polymorphic type, in case of a loading (input) archive.
      */
     template <typename...,
-        typename ArchiveType = Archive,
-        typename = typename ArchiveType::loading
-    >
-    void serialize(Archive & archive, std::unique_ptr<polymorphic> & object)
+              typename ArchiveType = Archive,
+              typename = typename ArchiveType::loading>
+    void serialize(Archive & archive,
+                   std::unique_ptr<polymorphic> & object)
     {
-        id_type id = 0;
+        id_type id{};
 
         // Load the serialization id.
         archive(id);
 
         // Lock the serialization method maps for read access.
         std::shared_lock<shared_mutex> lock(m_shared_mutex);
-        
+
         // Find the serialization method.
-        auto serialization_id_to_method_pair = m_serialization_id_to_method.find(id);
-        if (m_serialization_id_to_method.end() == serialization_id_to_method_pair) {
-            throw undeclared_polymorphic_type_error();
+        auto serialization_id_to_method_pair =
+            m_serialization_id_to_method.find(id);
+        if (m_serialization_id_to_method.end() ==
+            serialization_id_to_method_pair) {
+            throw undeclared_polymorphic_type_error(
+                "Undeclared polymorphic serialization type error.");
         }
 
         // Fetch the serialization method.
-        auto serialization_method = serialization_id_to_method_pair->second;
+        auto serialization_method =
+            serialization_id_to_method_pair->second;
 
         // Unlock the serialization method maps.
         lock.unlock();
@@ -1163,32 +1256,38 @@ public:
      * Serialize a polymorphic type, in case of a saving (output) archive.
      */
     template <typename...,
-        typename ArchiveType = Archive,
-        typename = typename ArchiveType::saving
-    >
+              typename ArchiveType = Archive,
+              typename = typename ArchiveType::saving>
     void serialize(Archive & archive, const polymorphic & object)
     {
         // Lock the serialization method maps for read access.
         std::shared_lock<shared_mutex> lock(m_shared_mutex);
 
         // Find the serialization id.
-        auto type_information_to_serialization_id_pair = m_type_information_to_serialization_id.find(
-            typeid(object).name());
-        if (m_type_information_to_serialization_id.end() == type_information_to_serialization_id_pair) {
-            throw undeclared_polymorphic_type_error();
+        auto type_information_to_serialization_id_pair =
+            m_type_information_to_serialization_id.find(
+                typeid(object).name());
+        if (m_type_information_to_serialization_id.end() ==
+            type_information_to_serialization_id_pair) {
+            throw undeclared_polymorphic_type_error(
+                "Undeclared polymorphic serialization type error.");
         }
 
         // Fetch the serialization id.
         auto id = type_information_to_serialization_id_pair->second;
 
         // Find the serialization method.
-        auto serialization_id_to_method_pair = m_serialization_id_to_method.find(id);
-        if (m_serialization_id_to_method.end() == serialization_id_to_method_pair) {
-            throw undeclared_polymorphic_type_error();
+        auto serialization_id_to_method_pair =
+            m_serialization_id_to_method.find(id);
+        if (m_serialization_id_to_method.end() ==
+            serialization_id_to_method_pair) {
+            throw undeclared_polymorphic_type_error(
+                "Undeclared polymorphic serialization type error.");
         }
 
         // Fetch the serialization method.
-        auto serialization_method = serialization_id_to_method_pair->second;
+        auto serialization_method =
+            serialization_id_to_method_pair->second;
 
         // Unlock the serialization method maps.
         lock.unlock();
@@ -1215,36 +1314,41 @@ private:
     /**
      * A map between serialization id to method.
      */
-    std::unordered_map<id_type, serialization_method_t<Archive>> m_serialization_id_to_method;
+    std::unordered_map<id_type, serialization_method_t<Archive>>
+        m_serialization_id_to_method;
 
     /**
      * A map between type information string to serialization id.
      */
-    std::unordered_map<std::string, id_type> m_type_information_to_serialization_id;
+    std::unordered_map<std::string, id_type>
+        m_type_information_to_serialization_id;
 }; // registry
 
 /**
  * Serialize resizable containers, operates on loading (input) archives.
  */
-template <typename Archive, typename Container, typename...,
+template <
+    typename Archive,
+    typename Container,
+    typename...,
     typename = decltype(std::declval<Container &>().size()),
     typename = decltype(std::declval<Container &>().begin()),
     typename = decltype(std::declval<Container &>().end()),
     typename = decltype(std::declval<Container &>().resize(std::size_t())),
     typename = std::enable_if_t<
-        std::is_class<
-            typename Container::value_type
-        >::value || !std::is_base_of<
+        std::is_class<typename Container::value_type>::value ||
+        !std::is_base_of<
             std::random_access_iterator_tag,
-            typename std::iterator_traits<typename Container::iterator>::iterator_category
-        >::value
-    >,
+            typename std::iterator_traits<
+                typename Container::iterator>::iterator_category>::value>,
     typename = typename Archive::loading,
-    typename = void, typename = void, typename = void, typename = void
->
+    typename = void,
+    typename = void,
+    typename = void,
+    typename = void>
 void serialize(Archive & archive, Container & container)
 {
-    size_type size = 0;
+    size_type size{};
 
     // Fetch the number of items to load.
     archive(size);
@@ -1261,22 +1365,26 @@ void serialize(Archive & archive, Container & container)
 /**
  * Serialize resizable containers, operates on saving (output) archives.
  */
-template <typename Archive, typename Container, typename...,
+template <
+    typename Archive,
+    typename Container,
+    typename...,
     typename = decltype(std::declval<Container &>().size()),
     typename = decltype(std::declval<Container &>().begin()),
     typename = decltype(std::declval<Container &>().end()),
     typename = decltype(std::declval<Container &>().resize(std::size_t())),
     typename = std::enable_if_t<
-        std::is_class<
-            typename Container::value_type
-        >::value || !std::is_base_of<
+        std::is_class<typename Container::value_type>::value ||
+        !std::is_base_of<
             std::random_access_iterator_tag,
-            typename std::iterator_traits<typename Container::iterator>::iterator_category
-        >::value || !detail::has_data_member_function<Container>::value
-    >,
+            typename std::iterator_traits<
+                typename Container::iterator>::iterator_category>::value ||
+        !detail::has_data_member_function<Container>::value>,
     typename = typename Archive::saving,
-    typename = void, typename = void, typename = void, typename = void
->
+    typename = void,
+    typename = void,
+    typename = void,
+    typename = void>
 void serialize(Archive & archive, const Container & container)
 {
     // Save the container size.
@@ -1289,10 +1397,13 @@ void serialize(Archive & archive, const Container & container)
 }
 
 /**
- * Serialize resizable, continuous containers, of fundamental or enumeration types.
- * Operates on loading (input) archives.
+ * Serialize resizable, continuous containers, of fundamental or
+ * enumeration types. Operates on loading (input) archives.
  */
-template <typename Archive, typename Container, typename...,
+template <
+    typename Archive,
+    typename Container,
+    typename...,
     typename = decltype(std::declval<Container &>().size()),
     typename = decltype(std::declval<Container &>().begin()),
     typename = decltype(std::declval<Container &>().end()),
@@ -1300,18 +1411,19 @@ template <typename Archive, typename Container, typename...,
     typename = decltype(std::declval<Container &>().data()),
     typename = std::enable_if_t<
         std::is_fundamental<typename Container::value_type>::value ||
-        std::is_enum<typename Container::value_type>::value
-    >,
+        std::is_enum<typename Container::value_type>::value>,
     typename = std::enable_if_t<std::is_base_of<
         std::random_access_iterator_tag,
-        typename std::iterator_traits<typename Container::iterator>::iterator_category>::value
-    >,
+        typename std::iterator_traits<
+            typename Container::iterator>::iterator_category>::value>,
     typename = typename Archive::loading,
-    typename = void, typename = void, typename = void, typename = void
->
+    typename = void,
+    typename = void,
+    typename = void,
+    typename = void>
 void serialize(Archive & archive, Container & container)
 {
-    size_type size = 0;
+    size_type size{};
 
     // Fetch the number of items to load.
     archive(size);
@@ -1325,14 +1437,18 @@ void serialize(Archive & archive, Container & container)
     }
 
     // Serialize the binary data.
-    archive(as_binary(std::addressof(container[0]), static_cast<size_type>(container.size())));
+    archive(as_binary(std::addressof(container[0]),
+                      static_cast<size_type>(container.size())));
 };
 
 /**
- * Serialize resizable, continuous containers, of fundamental or enumeration types.
- * Operates on saving (output) archives.
+ * Serialize resizable, continuous containers, of fundamental or
+ * enumeration types. Operates on saving (output) archives.
  */
-template <typename Archive, typename Container, typename...,
+template <
+    typename Archive,
+    typename Container,
+    typename...,
     typename = decltype(std::declval<Container &>().size()),
     typename = decltype(std::declval<Container &>().begin()),
     typename = decltype(std::declval<Container &>().end()),
@@ -1340,15 +1456,16 @@ template <typename Archive, typename Container, typename...,
     typename = decltype(std::declval<Container &>().data()),
     typename = std::enable_if_t<
         std::is_fundamental<typename Container::value_type>::value ||
-        std::is_enum<typename Container::value_type>::value
-    >,
+        std::is_enum<typename Container::value_type>::value>,
     typename = std::enable_if_t<std::is_base_of<
         std::random_access_iterator_tag,
-        typename std::iterator_traits<typename Container::iterator>::iterator_category>::value
-    >,
+        typename std::iterator_traits<
+            typename Container::iterator>::iterator_category>::value>,
     typename = typename Archive::saving,
-    typename = void, typename = void, typename = void, typename = void
->
+    typename = void,
+    typename = void,
+    typename = void,
+    typename = void>
 void serialize(Archive & archive, const Container & container)
 {
     // The container size.
@@ -1363,66 +1480,66 @@ void serialize(Archive & archive, const Container & container)
     }
 
     // Serialize the binary data.
-    archive(as_binary(std::addressof(container[0]), static_cast<size_type>(container.size())));
+    archive(as_binary(std::addressof(container[0]),
+                      static_cast<size_type>(container.size())));
 }
 
 /**
- * Serialize Associative and UnorderedAssociative containers, operates on loading (input) archives.
+ * Serialize Associative and UnorderedAssociative containers, operates on
+ * loading (input) archives.
  */
-template <typename Archive, typename Container, typename...,
-    typename = decltype(std::declval<Container &>().size()),
-    typename = decltype(std::declval<Container &>().begin()),
-    typename = decltype(std::declval<Container &>().end()),
-    typename = typename Container::value_type,
-    typename = typename Container::key_type,
-    typename = typename Archive::loading
->
+template <typename Archive,
+          typename Container,
+          typename...,
+          typename = decltype(std::declval<Container &>().size()),
+          typename = decltype(std::declval<Container &>().begin()),
+          typename = decltype(std::declval<Container &>().end()),
+          typename = typename Container::value_type,
+          typename = typename Container::key_type,
+          typename = typename Archive::loading>
 void serialize(Archive & archive, Container & container)
 {
-    size_type size = 0;
+    size_type size{};
 
     // Fetch the number of items to load.
     archive(size);
 
     // Serialize all the items.
-    for (size_type i = 0; i < size; ++i) {
+    for (size_type i{}; i < size; ++i) {
         // Deduce the container item type.
-        using item_type = detail::container_nonconst_value_type_t<Container>;
+        using item_type =
+            detail::container_nonconst_value_type_t<Container>;
 
         // Create just enough storage properly aligned for one item.
-        std::aligned_storage_t<sizeof(item_type), alignof(item_type)> storage;
+        std::aligned_storage_t<sizeof(item_type), alignof(item_type)>
+            storage;
 
-        // Default construct the item in the storage.
-        auto item = access::placement_new<item_type>(std::addressof(storage));
+        // Create the object at the storage.
+        std::unique_ptr<item_type, void (*)(item_type *)> object(
+            access::placement_new<item_type>(std::addressof(storage)),
+            [](auto pointer) { access::destruct(*pointer); });
 
-        try {
-            // Serialize the item.
-            archive(*item);
+        // Serialize the object.
+        archive(*object);
 
-            // Insert the item to the container.
-            container.insert(std::move(*item));
-        } catch (...) {
-            // Destruct the item.
-            access::destruct(*item);
-            throw;
-        }
-
-        // Destruct the item.
-        access::destruct(*item);
+        // Insert the item to the container.
+        container.insert(std::move(*object));
     }
 }
 
 /**
- * Serialize Associative and UnorderedAssociative containers, operates on saving (output) archives.
+ * Serialize Associative and UnorderedAssociative containers, operates on
+ * saving (output) archives.
  */
-template <typename Archive, typename Container, typename...,
-    typename = decltype(std::declval<Container &>().size()),
-    typename = decltype(std::declval<Container &>().begin()),
-    typename = decltype(std::declval<Container &>().end()),
-    typename = typename Container::value_type,
-    typename = typename Container::key_type,
-    typename = typename Archive::saving
->
+template <typename Archive,
+          typename Container,
+          typename...,
+          typename = decltype(std::declval<Container &>().size()),
+          typename = decltype(std::declval<Container &>().begin()),
+          typename = decltype(std::declval<Container &>().end()),
+          typename = typename Container::value_type,
+          typename = typename Container::key_type,
+          typename = typename Archive::saving>
 void serialize(Archive & archive, const Container & container)
 {
     // Save the container size.
@@ -1437,13 +1554,15 @@ void serialize(Archive & archive, const Container & container)
 /**
  * Serialize arrays, operates on loading (input) archives.
  */
-template <typename Archive, typename Item, std::size_t size, typename...,
-    typename = typename Archive::loading
->
-void serialize(Archive & archive, Item(&array)[size])
+template <typename Archive,
+          typename Item,
+          std::size_t size,
+          typename...,
+          typename = typename Archive::loading>
+void serialize(Archive & archive, Item (&array)[size])
 {
     // Serialize every item.
-    for (auto & item: array) {
+    for (auto & item : array) {
         archive(item);
     }
 }
@@ -1451,13 +1570,15 @@ void serialize(Archive & archive, Item(&array)[size])
 /**
  * Serialize arrays, operates on saving (output) archives.
  */
-template <typename Archive, typename Item, std::size_t size, typename...,
-    typename = typename Archive::saving
->
-void serialize(Archive & archive, const Item(&array)[size])
+template <typename Archive,
+          typename Item,
+          std::size_t size,
+          typename...,
+          typename = typename Archive::saving>
+void serialize(Archive & archive, const Item (&array)[size])
 {
     // Serialize every item.
-    for (auto & item: array) {
+    for (auto & item : array) {
         archive(item);
     }
 }
@@ -1465,13 +1586,15 @@ void serialize(Archive & archive, const Item(&array)[size])
 /**
  * Serialize std::array, operates on loading (input) archives.
  */
-template <typename Archive, typename Item, std::size_t size, typename...,
-    typename = typename Archive::loading
->
+template <typename Archive,
+          typename Item,
+          std::size_t size,
+          typename...,
+          typename = typename Archive::loading>
 void serialize(Archive & archive, std::array<Item, size> & array)
 {
     // Serialize every item.
-    for (auto & item: array) {
+    for (auto & item : array) {
         archive(item);
     }
 }
@@ -1479,13 +1602,15 @@ void serialize(Archive & archive, std::array<Item, size> & array)
 /**
  * Serialize std::array, operates on saving (output) archives.
  */
-template <typename Archive, typename Item, std::size_t size, typename...,
-    typename = typename Archive::saving
->
+template <typename Archive,
+          typename Item,
+          std::size_t size,
+          typename...,
+          typename = typename Archive::saving>
 void serialize(Archive & archive, const std::array<Item, size> & array)
 {
     // Serialize every item.
-    for (auto & item: array) {
+    for (auto & item : array) {
         archive(item);
     }
 }
@@ -1493,9 +1618,11 @@ void serialize(Archive & archive, const std::array<Item, size> & array)
 /**
  * Serialize std::pair, operates on loading (input) archives.
  */
-template <typename Archive, typename First, typename Second, typename...,
-    typename = typename Archive::loading
->
+template <typename Archive,
+          typename First,
+          typename Second,
+          typename...,
+          typename = typename Archive::loading>
 void serialize(Archive & archive, std::pair<First, Second> & pair)
 {
     // Serialize first, then second.
@@ -1505,9 +1632,11 @@ void serialize(Archive & archive, std::pair<First, Second> & pair)
 /**
  * Serialize std::pair, operates on saving (output) archives.
  */
-template <typename Archive, typename First, typename Second, typename...,
-    typename = typename Archive::saving
->
+template <typename Archive,
+          typename First,
+          typename Second,
+          typename...,
+          typename = typename Archive::saving>
 void serialize(Archive & archive, const std::pair<First, Second> & pair)
 {
     // Serialize first, then second.
@@ -1517,58 +1646,229 @@ void serialize(Archive & archive, const std::pair<First, Second> & pair)
 /**
  * Serialize std::tuple, operates on loading (input) archives.
  */
-template <typename Archive, typename... TupleItems,
-    typename = typename Archive::loading
->
+template <typename Archive,
+          typename... TupleItems,
+          typename = typename Archive::loading>
 void serialize(Archive & archive, std::tuple<TupleItems...> & tuple)
 {
     // Delegate to a helper function with an index sequence.
-    serialize(archive, tuple, std::make_index_sequence<sizeof...(TupleItems)>());
+    serialize(
+        archive, tuple, std::make_index_sequence<sizeof...(TupleItems)>());
 }
 
 /**
  * Serialize std::tuple, operates on saving (output) archives.
  */
-template <typename Archive, typename... TupleItems,
-    typename = typename Archive::saving
->
+template <typename Archive,
+          typename... TupleItems,
+          typename = typename Archive::saving>
 void serialize(Archive & archive, const std::tuple<TupleItems...> & tuple)
 {
     // Delegate to a helper function with an index sequence.
-    serialize(archive, tuple, std::make_index_sequence<sizeof...(TupleItems)>());
+    serialize(
+        archive, tuple, std::make_index_sequence<sizeof...(TupleItems)>());
 }
 
 /**
  * Serialize std::tuple, operates on loading (input) archives.
- * This overload serves as a helper function that accepts an index sequence.
+ * This overload serves as a helper function that accepts an index
+ * sequence.
  */
-template <typename Archive, typename... TupleItems, std::size_t... Indices,
-    typename = typename Archive::loading
->
-void serialize(Archive & archive, std::tuple<TupleItems...> & tuple, std::index_sequence<Indices...>)
+template <typename Archive,
+          typename... TupleItems,
+          std::size_t... Indices,
+          typename = typename Archive::loading>
+void serialize(Archive & archive,
+               std::tuple<TupleItems...> & tuple,
+               std::index_sequence<Indices...>)
 {
     archive(std::get<Indices>(tuple)...);
 }
 
 /**
  * Serialize std::tuple, operates on saving (output) archives.
- * This overload serves as a helper function that accepts an index sequence.
+ * This overload serves as a helper function that accepts an index
+ * sequence.
  */
-template <typename Archive, typename... TupleItems, std::size_t... Indices,
-    typename = typename Archive::saving
->
-void serialize(Archive & archive, const std::tuple<TupleItems...> & tuple, std::index_sequence<Indices...>)
+template <typename Archive,
+          typename... TupleItems,
+          std::size_t... Indices,
+          typename = typename Archive::saving>
+void serialize(Archive & archive,
+               const std::tuple<TupleItems...> & tuple,
+               std::index_sequence<Indices...>)
 {
     archive(std::get<Indices>(tuple)...);
 }
 
+#if __cplusplus >= 201703L
 /**
- * Serialize std::unique_ptr of non polymorphic, in case of a loading (input) archive.
+ * Serialize std::optional, operates on loading (input) archives.
  */
-template <typename Archive, typename Type, typename...,
-    typename = std::enable_if_t<!std::is_base_of<polymorphic, Type>::value>,
-    typename = typename Archive::loading
->
+template <typename Archive,
+          typename Type,
+          typename...,
+          typename = typename Archive::loading>
+void serialize(Archive & archive, std::optional<Type> & optional)
+{
+    // Load whether has value.
+    bool has_value{};
+    archive(has_value);
+
+    // If does not have a value.
+    if (!has_value) {
+        optional = std::nullopt;
+        return;
+    }
+
+    // If the type is default constructible.
+    if constexpr (std::is_default_constructible_v<Type>) {
+        // Create the value if does not exist.
+        if (!optional) {
+            optional = Type{};
+        }
+
+        // Load the value.
+        archive(*optional);
+    } else {
+        // The object storage.
+        std::aligned_storage_t<sizeof(Type), alignof(Type)> storage;
+
+        // Create the object at the storage.
+        std::unique_ptr<Type, void (*)(Type *)> object(
+            access::placement_new<Type>(std::addressof(storage)),
+            [](auto pointer) { access::destruct(*pointer); });
+
+        // Load the object.
+        archive(*object);
+
+        // Assign the loaded object.
+        optional = std::move(*object);
+    }
+}
+
+/**
+ * Serialize std::optional, operates on saving (output) archives.
+ */
+template <typename Archive,
+          typename Type,
+          typename...,
+          typename = typename Archive::saving>
+void serialize(Archive & archive, const std::optional<Type> & optional)
+{
+    // Save has value.
+    bool has_value = optional.has_value();
+
+    // If has value, save it.
+    if (has_value) {
+        archive(has_value, *optional);
+    } else {
+        archive(has_value);
+    }
+}
+
+/**
+ * Serialize std::variant, operates on loading (input) archives.
+ */
+template <typename Archive,
+          typename... Types,
+          typename = typename Archive::loading>
+void serialize(Archive & archive, std::variant<Types...> & variant)
+{
+    // Test for maximum number of types.
+    static_assert(sizeof...(Types) < 0xff, "Max variant types reached.");
+
+    // The variant index.
+    unsigned char index{};
+
+    // Load the index.
+    archive(index);
+
+    // Check that loaded index is inside bounds.
+    if (index >= sizeof...(Types)) {
+        throw variant_index_out_of_range("Variant index out of range");
+    }
+
+    // The variant type.
+    using variant_type = std::variant<Types...>;
+
+    // Loader type.
+    using loader_type =
+        void (*)(Archive & archive, variant_type & variant);
+
+    // Loaders per variant index.
+    static constexpr loader_type loaders[] = {[](auto & archive,
+                                                 auto & variant) {
+        // If the type is default constructible.
+        if constexpr (std::is_default_constructible_v<Types>) {
+            // If does not have the needed type, assign it.
+            if (!std::get_if<Types>(&variant)) {
+                variant = Types{};
+            }
+
+            // Load the value.
+            archive(*std::get_if<Types>(&variant));
+        } else {
+            // The object storage.
+            std::aligned_storage_t<sizeof(Types), alignof(Types)> storage;
+
+            // Create the object at the storage.
+            std::unique_ptr<Types, void (*)(Types *)> object(
+                access::placement_new<Types>(std::addressof(storage)),
+                [](auto pointer) { access::destruct(*pointer); });
+
+            // Load the object.
+            archive(*object);
+
+            // Assign the loaded object.
+            variant = std::move(*object);
+        }
+    }...};
+
+    // Execute the appropriate loader.
+    loaders[index](archive, variant);
+}
+
+/**
+ * Serialize std::variant, operates on saving (output) archives.
+ */
+template <typename Archive,
+          typename... Types,
+          typename = typename Archive::saving>
+void serialize(Archive & archive, const std::variant<Types...> & variant)
+{
+    // Test for maximum number of types.
+    static_assert(sizeof...(Types) < 0xff, "Max variant types reached.");
+
+    // The variant index.
+    auto variant_index = variant.index();
+
+    // Disallow serializations of valueless variant.
+    if (std::variant_npos == variant_index) {
+        throw attempt_to_serialize_valueless_variant(
+            "Cannot serialize a valueless variant.");
+    }
+
+    // The index to save.
+    auto index = static_cast<unsigned char>(variant_index & 0xff);
+
+    // Save the variant object.
+    std::visit(
+        [index, &archive](auto & object) { archive(index, object); },
+        variant);
+}
+#endif
+
+/**
+ * Serialize std::unique_ptr of non polymorphic, in case of a loading
+ * (input) archive.
+ */
+template <typename Archive,
+          typename Type,
+          typename...,
+          typename =
+              std::enable_if_t<!std::is_base_of<polymorphic, Type>::value>,
+          typename = typename Archive::loading>
 void serialize(Archive & archive, std::unique_ptr<Type> & object)
 {
     // Construct a new object.
@@ -1582,17 +1882,21 @@ void serialize(Archive & archive, std::unique_ptr<Type> & object)
 }
 
 /**
- * Serialize std::unique_ptr of non polymorphic, in case of a saving (output) archive.
+ * Serialize std::unique_ptr of non polymorphic, in case of a saving
+ * (output) archive.
  */
-template <typename Archive, typename Type, typename...,
-    typename = std::enable_if_t<!std::is_base_of<polymorphic, Type>::value>,
-    typename = typename Archive::saving
->
+template <typename Archive,
+          typename Type,
+          typename...,
+          typename =
+              std::enable_if_t<!std::is_base_of<polymorphic, Type>::value>,
+          typename = typename Archive::saving>
 void serialize(Archive & archive, const std::unique_ptr<Type> & object)
 {
     // Prevent serialization of null pointers.
     if (nullptr == object) {
-        throw attempt_to_serialize_null_pointer_error();
+        throw attempt_to_serialize_null_pointer_error(
+            "Attempt to serialize null pointer.");
     }
 
     // Serialize the object.
@@ -1600,13 +1904,16 @@ void serialize(Archive & archive, const std::unique_ptr<Type> & object)
 }
 
 /**
- * Serialize std::unique_ptr of polymorphic, in case of a loading (input) archive.
+ * Serialize std::unique_ptr of polymorphic, in case of a loading (input)
+ * archive.
  */
-template <typename Archive, typename Type, typename...,
+template <
+    typename Archive,
+    typename Type,
+    typename...,
     typename = std::enable_if_t<std::is_base_of<polymorphic, Type>::value>,
     typename = typename Archive::loading,
-    typename = void
->
+    typename = void>
 void serialize(Archive & archive, std::unique_ptr<Type> & object)
 {
     std::unique_ptr<polymorphic> loaded_type;
@@ -1625,23 +1932,28 @@ void serialize(Archive & archive, std::unique_ptr<Type> & object)
         loaded_type.release();
     } catch (const std::bad_cast &) {
         // The loaded type was not convertible to Type.
-        throw polymorphic_type_mismatch_error();
+        throw polymorphic_type_mismatch_error(
+            "Polymorphic serialization type mismatch.");
     }
 }
 
 /**
- * Serialize std::unique_ptr of polymorphic, in case of a saving (output) archive.
+ * Serialize std::unique_ptr of polymorphic, in case of a saving (output)
+ * archive.
  */
-template <typename Archive, typename Type, typename...,
+template <
+    typename Archive,
+    typename Type,
+    typename...,
     typename = std::enable_if_t<std::is_base_of<polymorphic, Type>::value>,
     typename = typename Archive::saving,
-    typename = void
->
+    typename = void>
 void serialize(Archive & archive, const std::unique_ptr<Type> & object)
 {
     // Prevent serialization of null pointers.
     if (nullptr == object) {
-        throw attempt_to_serialize_null_pointer_error();
+        throw attempt_to_serialize_null_pointer_error(
+            "Attempt to serialize null pointer.");
     }
 
     // Get the instance of the polymorphic registry.
@@ -1652,12 +1964,15 @@ void serialize(Archive & archive, const std::unique_ptr<Type> & object)
 }
 
 /**
- * Serialize std::shared_ptr of non polymorphic, in case of a loading (input) archive.
+ * Serialize std::shared_ptr of non polymorphic, in case of a loading
+ * (input) archive.
  */
-template <typename Archive, typename Type, typename...,
-    typename = std::enable_if_t<!std::is_base_of<polymorphic, Type>::value>,
-    typename = typename Archive::loading
->
+template <typename Archive,
+          typename Type,
+          typename...,
+          typename =
+              std::enable_if_t<!std::is_base_of<polymorphic, Type>::value>,
+          typename = typename Archive::loading>
 void serialize(Archive & archive, std::shared_ptr<Type> & object)
 {
     // Construct a new object.
@@ -1671,17 +1986,21 @@ void serialize(Archive & archive, std::shared_ptr<Type> & object)
 }
 
 /**
- * Serialize std::shared_ptr of non polymorphic, in case of a saving (output) archive.
+ * Serialize std::shared_ptr of non polymorphic, in case of a saving
+ * (output) archive.
  */
-template <typename Archive, typename Type, typename...,
-    typename = std::enable_if_t<!std::is_base_of<polymorphic, Type>::value>,
-    typename = typename Archive::saving
->
+template <typename Archive,
+          typename Type,
+          typename...,
+          typename =
+              std::enable_if_t<!std::is_base_of<polymorphic, Type>::value>,
+          typename = typename Archive::saving>
 void serialize(Archive & archive, const std::shared_ptr<Type> & object)
 {
     // Prevent serialization of null pointers.
     if (nullptr == object) {
-        throw attempt_to_serialize_null_pointer_error();
+        throw attempt_to_serialize_null_pointer_error(
+            "Attempt to serialize null pointer.");
     }
 
     // Serialize the object.
@@ -1689,13 +2008,16 @@ void serialize(Archive & archive, const std::shared_ptr<Type> & object)
 }
 
 /**
- * Serialize std::shared_ptr of polymorphic, in case of a loading (input) archive.
+ * Serialize std::shared_ptr of polymorphic, in case of a loading (input)
+ * archive.
  */
-template <typename Archive, typename Type, typename...,
+template <
+    typename Archive,
+    typename Type,
+    typename...,
     typename = std::enable_if_t<std::is_base_of<polymorphic, Type>::value>,
     typename = typename Archive::loading,
-    typename = void
->
+    typename = void>
 void serialize(Archive & archive, std::shared_ptr<Type> & object)
 {
     std::unique_ptr<polymorphic> loaded_type;
@@ -1714,23 +2036,28 @@ void serialize(Archive & archive, std::shared_ptr<Type> & object)
         loaded_type.release();
     } catch (const std::bad_cast &) {
         // The loaded type was not convertible to Type.
-        throw polymorphic_type_mismatch_error();
+        throw polymorphic_type_mismatch_error(
+            "Polymorphic serialization type mismatch.");
     }
 }
 
 /**
- * Serialize std::shared_ptr of polymorphic, in case of a saving (output) archive.
+ * Serialize std::shared_ptr of polymorphic, in case of a saving (output)
+ * archive.
  */
-template <typename Archive, typename Type, typename...,
+template <
+    typename Archive,
+    typename Type,
+    typename...,
     typename = std::enable_if_t<std::is_base_of<polymorphic, Type>::value>,
     typename = typename Archive::saving,
-    typename = void
->
+    typename = void>
 void serialize(Archive & archive, const std::shared_ptr<Type> & object)
 {
     // Prevent serialization of null pointers.
     if (nullptr == object) {
-        throw attempt_to_serialize_null_pointer_error();
+        throw attempt_to_serialize_null_pointer_error(
+            "Attempt to serialize null pointer.");
     }
 
     // Get the instance of the polymorphic registry.
@@ -1745,9 +2072,10 @@ void serialize(Archive & archive, const std::shared_ptr<Type> & object)
  * which is supported only for saving (output) archives.
  * Usually used with the as_polymorphic facility.
  */
-template <typename Archive, typename Type, typename...,
-    typename = typename Archive::saving
->
+template <typename Archive,
+          typename Type,
+          typename...,
+          typename = typename Archive::saving>
 void serialize(Archive & archive, const polymorphic_wrapper<Type> & object)
 {
     // Get the instance of the polymorphic registry.
@@ -1761,15 +2089,16 @@ void serialize(Archive & archive, const polymorphic_wrapper<Type> & object)
  * A meta container that holds a sequence of archives.
  */
 template <typename... Archives>
-struct archive_sequence {};
+struct archive_sequence
+{
+};
 
 /**
  * The built in archives.
  */
-using builtin_archives = archive_sequence<
-    memory_view_input_archive,
-    lazy_vector_memory_output_archive
->;
+using builtin_archives =
+    archive_sequence<memory_view_input_archive,
+                     lazy_vector_memory_output_archive>;
 
 /**
  * Makes a meta pair of type and id.
@@ -1795,14 +2124,14 @@ class register_types<>
  * Registers user defined polymorphic types to serialization registry.
  */
 template <typename Type, id_type id, typename... ExtraTypes>
-class register_types<make_type<Type, id>, ExtraTypes...> : private register_types<ExtraTypes...>
+class register_types<make_type<Type, id>, ExtraTypes...>
+    : private register_types<ExtraTypes...>
 {
 public:
     /**
      * Registers the type to the built in archives of the serializer.
      */
-    register_types() noexcept :
-        register_types(builtin_archives())
+    register_types() noexcept : register_types(builtin_archives())
     {
     }
 
@@ -1820,7 +2149,8 @@ private:
      * Registers the type to every archive in the given archive sequence.
      */
     template <typename Archive, typename... Archives>
-    void register_type_to_archives(archive_sequence<Archive, Archives...>) noexcept
+    void register_type_to_archives(
+        archive_sequence<Archive, Archives...>) noexcept
     {
         // Register the type to the first archive.
         register_type_to_archive<Archive>();
@@ -1871,39 +2201,48 @@ constexpr id_type make_id(const char (&name)[size])
     std::uint64_t message_size = (size - 1) * 8;
 
     // Calculate the size aligned to 64 bytes (512 bits).
-    constexpr std::size_t aligned_message_size = (((size + sizeof(std::uint64_t)) + 63) / 64) * 64;
-        
+    constexpr std::size_t aligned_message_size =
+        (((size + sizeof(std::uint64_t)) + 63) / 64) * 64;
+
     // Construct the pre-processed message.
-    std::uint32_t preprocessed_message[aligned_message_size / sizeof(std::uint32_t)] = {};
-    for (std::size_t i = 0; i < size - 1; ++i) {
-        preprocessed_message[i / 4] |= detail::swap_byte_order(std::uint32_t(name[i]) 
+    std::uint32_t preprocessed_message[aligned_message_size /
+                                       sizeof(std::uint32_t)] = {};
+    for (std::size_t i{}; i < size - 1; ++i) {
+        preprocessed_message[i / 4] |= detail::swap_byte_order(
+            std::uint32_t(name[i])
             << ((sizeof(std::uint32_t) - 1 - (i % 4)) * 8));
     }
 
     // Append the byte 0x80.
-    preprocessed_message[(size - 1) / 4] |= detail::swap_byte_order(std::uint32_t(0x80) 
+    preprocessed_message[(size - 1) / 4] |= detail::swap_byte_order(
+        std::uint32_t(0x80)
         << ((sizeof(std::uint32_t) - 1 - ((size - 1) % 4)) * 8));
 
     // Append the length in bits, in 64 bit, big endian.
-    preprocessed_message[(aligned_message_size / sizeof(std::uint32_t)) - 2] = 
+    preprocessed_message[(aligned_message_size / sizeof(std::uint32_t)) -
+                         2] =
         detail::swap_byte_order(std::uint32_t(message_size >> 32));
-    preprocessed_message[(aligned_message_size / sizeof(std::uint32_t)) - 1] = 
+    preprocessed_message[(aligned_message_size / sizeof(std::uint32_t)) -
+                         1] =
         detail::swap_byte_order(std::uint32_t(message_size));
 
     // Process the message in successive 512-bit chunks.
-    for (std::size_t i = 0; i < (aligned_message_size / sizeof(std::uint32_t)); i += 16) {
+    for (std::size_t i{};
+         i < (aligned_message_size / sizeof(std::uint32_t));
+         i += 16) {
         std::uint32_t w[80] = {};
 
         // Set the value of w.
-        for (std::size_t j = 0; j < 16; ++j) {
+        for (std::size_t j{}; j < 16; ++j) {
             w[j] = preprocessed_message[i + j];
         }
 
         // Extend the sixteen 32-bit words into eighty 32-bit words.
         for (std::size_t j = 16; j < 80; ++j) {
-            w[j] = detail::swap_byte_order(detail::rotate_left(detail::swap_byte_order(
-                w[j - 3] ^ w[j - 8] ^
-                   w[j - 14] ^ w[j - 16]), 1));
+            w[j] = detail::swap_byte_order(detail::rotate_left(
+                detail::swap_byte_order(w[j - 3] ^ w[j - 8] ^ w[j - 14] ^
+                                        w[j - 16]),
+                1));
         }
 
         // Initialize hash values for this chunk.
@@ -1914,9 +2253,9 @@ constexpr id_type make_id(const char (&name)[size])
         auto e = h4;
 
         // Main loop.
-        for (std::size_t j = 0; j < 80; ++j) {
-            std::uint32_t f = 0;
-            std::uint32_t k = 0;
+        for (std::size_t j{}; j < 80; ++j) {
+            std::uint32_t f{};
+            std::uint32_t k{};
             if (j <= 19) {
                 f = (b & c) | ((~b) & d);
                 k = 0x5A827999u;
@@ -1931,8 +2270,8 @@ constexpr id_type make_id(const char (&name)[size])
                 k = 0xCA62C1D6u;
             }
 
-            auto temp = detail::rotate_left(a, 5) + f + e + k + 
-                detail::swap_byte_order(w[j]);
+            auto temp = detail::rotate_left(a, 5) + f + e + k +
+                        detail::swap_byte_order(w[j]);
             e = d;
             d = c;
             c = detail::rotate_left(b, 30);
@@ -1952,7 +2291,7 @@ constexpr id_type make_id(const char (&name)[size])
     return detail::swap_byte_order((std::uint64_t(h0) << 32) | h1);
 } // make_id
 
-} // serializer
-} // zpp
+} // namespace serializer
+} // namespace zpp
 
 #endif
