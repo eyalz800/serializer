@@ -16,7 +16,7 @@ you with the highest level of performance using zero copy techniques, thus suppo
 Some frameworks require you to run a script that generates the C++ code that serializes your classes;
 
 While there are many excellent serialization frameworks, the diversity of the features and complexity often
-make them hard to adopt, some of them require you to change existing code to integrate them, or even set up 
+make them hard to adopt, some of them require you to change existing code to integrate them, or even set up
 your build environment differently.
 
 I finally reached the conclusion that I do not need all those features.
@@ -24,7 +24,7 @@ I definitly do not want to either pay unnecessary price in performance to serial
 my already existing classes, modify my build systems, write my classes in another format and compile it into C++.
 
 What I needed was to have my classes serialized in a zero overhead manner into binary, with the ability to serialize
-objects by their dynamic type, allowing easy dispatch logic between a server and client side, with little to no 
+objects by their dynamic type, allowing easy dispatch logic between a server and client side, with little to no
 change to my already existing classes.
 
 Motivation
@@ -175,7 +175,7 @@ public:
     {
         return m_x;
     }
- 
+
     int get_y() const noexcept
     {
         return m_y;
@@ -258,7 +258,7 @@ static void foo()
     zpp::serializer::memory_output_archive out(data);
 
     out(point(1337, 1338));
-    
+
     point my_point;
     in(my_point);
 
@@ -274,7 +274,7 @@ static void bar()
     std::unique_ptr<person> my_person = std::make_unique<student>("1337", "1337University");
     out(my_person);
 
-    my_person = nullptr; 
+    my_person = nullptr;
     in(my_person);
 
     my_person->print();
@@ -287,13 +287,58 @@ static void foobar()
     zpp::serializer::memory_output_archive out(data);
 
     out(zpp::serializer::as_polymorphic(student("1337", "1337University")));
-    
+
     std::unique_ptr<person> my_person;
     in(my_person);
 
     my_person->print();
 }
 ```
+
+Feestanding Implementation
+--------------------------
+The library also supports experimental freestanding mode, to allow running in an environment
+without exceptions and rtti.
+
+To enable freestanding mode, define `ZPP_SERIALIZER_FREESTANDING` preprocessing macro.
+
+In this mode polymorphic serialization is not supported, and error checking
+is done via return values.
+
+The returned error type is `zpp::serializer::freestanding::error`. The numeric value of the error is of
+the values in the enum class `zpp::serializer::error` and is accessible by `code()` member function.
+The error message is accessible by calling the `message()` member function, as a `std::string_view`.
+
+In this mode serialization functions should be declared with `auto` as the return type, and return the result
+from the `archive`, like so:
+```cpp
+    template <typename Archive, typename Self>
+    static auto serialize(Archive & archive, Self & self)
+    {
+        return archive(self.m_x, self.m_y);
+    }
+```
+
+Error checking is done like so:
+```cpp
+    std::vector<unsigned char> data;
+    zpp::serializer::memory_input_archive in(data);
+    zpp::serializer::memory_output_archive out(data);
+
+    if (auto result = out(point(1337, 1338)); !result) {
+        std::cout << "Error: " << result.code() << " message: " << result.message() << '\n';
+        // return failure / throw
+    }
+
+    point my_point;
+    if (auto result = in(my_point); !result) {
+        std::cout << "Error: " << result.code() << " message: " << result.message() << '\n';
+        // return failure / throw
+    }
+
+    std::cout << my_point.get_x() << ' ' << my_point.get_y() << '\n';
+```
+
 
 A Python Version
 ----------------

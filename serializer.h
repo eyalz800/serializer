@@ -10,17 +10,21 @@
 #include <memory>
 #include <mutex>
 #include <new>
-#include <shared_mutex>
 #include <stdexcept>
 #include <string>
 #include <tuple>
 #include <type_traits>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 #if __cplusplus >= 201703L
 #include <optional>
 #include <variant>
+#endif
+#ifdef ZPP_SERIALIZER_FREESTANDING
+#include <string_view>
+#else
+#include <shared_mutex>
+#include <unordered_map>
 #endif
 
 namespace zpp
@@ -177,6 +181,271 @@ namespace zpp
  */
 namespace serializer
 {
+#ifdef ZPP_SERIALIZER_FREESTANDING
+namespace freestanding
+{
+/**
+ * Returns the error category for a given error code enumeration type,
+ * using an argument dependent lookup of a user implemented category
+ * function.
+ */
+template <typename ErrorCode>
+decltype(auto) category()
+{
+    return category(ErrorCode{});
+}
+
+/**
+ * The error category which responsible for translating error codes to
+ * error messages.
+ */
+class error_category
+{
+public:
+    /**
+     * Returns the error category name.
+     */
+    virtual std::string_view name() const noexcept = 0;
+
+    /**
+     * Return the error message for a given error code.
+     * For success codes, it is unspecified what value is returned.
+     * For convienience, you may return zpp::error::no_error for success.
+     * All other codes must return non empty string views.
+     */
+    virtual std::string_view message(int code) const noexcept = 0;
+
+    /**
+     * Returns true if success code, else false.
+     */
+    bool success(int code) const
+    {
+        return code == m_success_code;
+    }
+
+protected:
+    /**
+     * Creates an error category whose success code is 'success_code'.
+     */
+    constexpr error_category(int success_code) :
+        m_success_code(success_code)
+    {
+    }
+
+    /**
+     * Destroys the error category.
+     */
+    ~error_category() = default;
+
+private:
+    /**
+     * The success code.
+     */
+    int m_success_code{};
+};
+
+/**
+ * Creates an error category, whose name and success
+ * code are specified, as well as a message translation
+ * logic that returns the error message for every error code.
+ * Note: message translation must not throw.
+ */
+template <typename ErrorCode, typename Messages>
+constexpr auto make_error_category(std::string_view name,
+                                   ErrorCode success_code,
+                                   Messages && messages)
+{
+    // Create a category with the name and messages.
+    class category : public error_category,
+                     private std::remove_reference_t<Messages>
+    {
+    public:
+        constexpr category(std::string_view name,
+                           ErrorCode success_code,
+                           Messages && messages) :
+            error_category(
+                std::underlying_type_t<ErrorCode>(success_code)),
+            std::remove_reference_t<Messages>(
+                std::forward<Messages>(messages)),
+            m_name(name)
+        {
+        }
+
+        std::string_view name() const noexcept override
+        {
+            return m_name;
+        }
+
+        std::string_view message(int code) const noexcept override
+        {
+            return this->operator()(ErrorCode{code});
+        }
+
+    private:
+        std::string_view m_name;
+    } category(name, success_code, std::forward<Messages>(messages));
+
+    // Return the category.
+    return category;
+}
+
+/**
+ * Represents an error to be initialized from an error code
+ * enumeration.
+ * The error code enumeration must have 'int' as underlying type.
+ * Defining an error code enum and a category for it goes as follows.
+ * Example:
+ * ~~~
+ * namespace my_namespace
+ * {
+ * enum class my_error : int
+ * {
+ *     success = 0,
+ *     something_bad = 1,
+ *     something_really_bad = 2,
+ * };
+ *
+ * inline const zpp::error_category & category(my_error)
+ * {
+ *     constexpr static auto error_category =
+ *         zpp::make_error_category("my_category", my_error::success,
+ *             [](auto code) -> std::string_view {
+ *                 switch (code) {
+ *                     case my_error::success:
+ *                         return zpp::error::no_error;
+ *                     case my_code:something_bad:
+ *                         return "Something bad happened.";
+ *                     case my_error::something_really_bad:
+ *                         return "Something really bad happened.";
+ *                     default:
+ *                         return "Unknown error occurred.";
+ *                 }
+ *             }
+ *         );
+ *     return error_category;
+ * }
+ * } // my_namespace
+ * ~~~
+ */
+class error
+{
+public:
+    /**
+     * Disables default construction.
+     */
+    error() = delete;
+
+    /**
+     * Constructs an error from an error code enumeration, the
+     * category is looked by using argument dependent lookup on a
+     * function named 'category' that receives the error code
+     * enumeration value.
+     */
+    template <typename ErrorCode>
+    error(ErrorCode error_code) :
+        m_category(std::addressof(
+            zpp::serializer::freestanding::category<ErrorCode>())),
+        m_code(std::underlying_type_t<ErrorCode>(error_code))
+    {
+    }
+
+    /**
+     * Constructs an error from an error code enumeration, the
+     * category is given explicitly in this overload.
+     */
+    template <typename ErrorCode>
+    error(ErrorCode error_code, const error_category & category) :
+        m_category(std::addressof(category)),
+        m_code(std::underlying_type_t<ErrorCode>(error_code))
+    {
+    }
+
+    /**
+     * Returns the error category.
+     */
+    const error_category & category() const
+    {
+        return *m_category;
+    }
+
+    /**
+     * Returns the error code.
+     */
+    int code() const
+    {
+        return m_code;
+    }
+
+    /**
+     * Returns the error message. Calling this on
+     * a success error is implementation defined according
+     * to the error category.
+     */
+    std::string_view message() const
+    {
+        return m_category->message(m_code);
+    }
+
+    /**
+     * Returns true if the error indicates success, else false.
+     */
+    explicit operator bool() const
+    {
+        return m_category->success(m_code);
+    }
+
+    /**
+     * No error message value.
+     */
+    static constexpr std::string_view no_error{};
+
+private:
+    /**
+     * The error category.
+     */
+    const error_category * m_category{};
+
+    /**
+     * The error code.
+     */
+    int m_code{};
+};
+} // namespace freestanding
+
+enum class error : int
+{
+    success = 0,
+    out_of_range = 1,
+    variant_is_valueless = 2,
+    null_pointer_serialization = 3,
+};
+
+inline const freestanding::error_category & category(error)
+{
+    constexpr static auto error_category =
+        freestanding::make_error_category(
+            "zpp::serializer",
+            error::success,
+            [](auto code) -> std::string_view {
+                switch (code) {
+                case error::success:
+                    return freestanding::error::no_error;
+                case error::out_of_range:
+                    return "[zpp::serializer] Out of range error";
+                case error::variant_is_valueless:
+                    return "[zpp::serializer] Cannot serialize a "
+                           "valueless variant.";
+                case error::null_pointer_serialization:
+                    return "[zpp::serializer] Cannot serialize a null "
+                           "pointer.";
+                default:
+                    return "[zpp::serializer] Unknown error occurred.";
+                }
+            });
+    return error_category;
+}
+#endif // ZPP_SERIALIZER_FREESTANDING
+
 namespace detail
 {
 /**
@@ -361,6 +630,7 @@ using variant_index_out_of_range = detail::exception<std::out_of_range, 5>;
 /**
  * If C++17 or greater, use shared mutex, else, use shared timed mutex.
  */
+#ifndef ZPP_SERIALIZER_FREESTANDING
 #if __cplusplus >= 201703L
 /**
  * The shared mutex type, defined to shared mutex when available.
@@ -372,6 +642,7 @@ using shared_mutex = std::shared_mutex;
  * is not available.
  */
 using shared_mutex = std::shared_timed_mutex;
+#endif
 #endif
 
 /**
@@ -697,7 +968,7 @@ public:
      * Save/Load the given items into/from the archive.
      */
     template <typename... Items>
-    void operator()(Items &&... items)
+    auto operator()(Items &&... items)
     {
         // Disallow serialization of pointer types.
         static_assert(
@@ -706,7 +977,7 @@ public:
             "Serialization of pointer types is not allowed");
 
         // Serialize the items.
-        serialize_items(std::forward<Items>(items)...);
+        return serialize_items(std::forward<Items>(items)...);
     }
 
 protected:
@@ -725,20 +996,30 @@ private:
      * Serialize the given items, one by one.
      */
     template <typename Item, typename... Items>
-    void serialize_items(Item && first, Items &&... items)
+    auto serialize_items(Item && first, Items &&... items)
     {
+#ifndef ZPP_SERIALIZER_FREESTANDING
         // Invoke serialize_item the first item.
         serialize_item(std::forward<Item>(first));
-
+#else
+        // Invoke serialize_item the first item.
+        if (auto result = serialize_item(std::forward<Item>(first));
+            !result) {
+            return result;
+        }
+#endif
         // Serialize the rest of the items.
-        serialize_items(std::forward<Items>(items)...);
+        return serialize_items(std::forward<Items>(items)...);
     }
 
     /**
      * Serializes zero items.
      */
-    void serialize_items()
+    auto serialize_items()
     {
+#ifdef ZPP_SERIALIZER_FREESTANDING
+        return freestanding::error{error::success};
+#endif
     }
 
     /**
@@ -749,10 +1030,11 @@ private:
               typename...,
               typename = decltype(std::remove_reference_t<Item>::serialize(
                   std::declval<archive_type &>(), std::declval<Item &>()))>
-    void serialize_item(Item && item)
+    auto serialize_item(Item && item)
     {
         // Forward as lvalue.
-        std::remove_reference_t<Item>::serialize(concrete_archive(), item);
+        return std::remove_reference_t<Item>::serialize(concrete_archive(),
+                                                        item);
     }
 
     /**
@@ -764,10 +1046,10 @@ private:
               typename = decltype(serialize(std::declval<archive_type &>(),
                                             std::declval<Item &>())),
               typename = void>
-    void serialize_item(Item && item)
+    auto serialize_item(Item && item)
     {
         // Forward as lvalue.
-        serialize(concrete_archive(), item);
+        return serialize(concrete_archive(), item);
     }
 
     /**
@@ -780,10 +1062,10 @@ private:
                   std::remove_reference_t<Item>>::value>,
               typename = void,
               typename = void>
-    void serialize_item(Item && item)
+    auto serialize_item(Item && item)
     {
         // Forward as lvalue.
-        concrete_archive().serialize(item);
+        return concrete_archive().serialize(item);
     }
 
     /**
@@ -797,7 +1079,7 @@ private:
               typename = void,
               typename = void,
               typename = void>
-    void serialize_item(Item && item)
+    auto serialize_item(Item && item)
     {
         // If the enum is const, we want the type to be a const type, else
         // non-const.
@@ -807,7 +1089,7 @@ private:
             std::underlying_type_t<std::remove_reference_t<Item>>>;
 
         // Cast the enum to the underlying type, and forward as lvalue.
-        concrete_archive().serialize(
+        return concrete_archive().serialize(
             reinterpret_cast<std::add_lvalue_reference_t<integral_type>>(
                 item));
     }
@@ -816,9 +1098,10 @@ private:
      * Serialize binary data.
      */
     template <typename T>
-    void serialize_item(binary<T> && item)
+    auto serialize_item(binary<T> && item)
     {
-        concrete_archive().serialize(item.data(), item.size_in_bytes());
+        return concrete_archive().serialize(item.data(),
+                                            item.size_in_bytes());
     }
 
     /**
@@ -870,7 +1153,7 @@ protected:
      * Serialize a single item - save it to the vector.
      */
     template <typename Item>
-    void serialize(Item && item)
+    auto serialize(Item && item)
     {
         // Increase vector size.
         if (m_size + sizeof(item) > m_output->size()) {
@@ -885,12 +1168,16 @@ protected:
 
         // Increase the size.
         m_size += sizeof(item);
+
+#ifdef ZPP_SERIALIZER_FREESTANDING
+        return freestanding::error{error::success};
+#endif
     }
 
     /**
      * Serialize binary data - save it to the vector.
      */
-    void serialize(const void * data, size_type size)
+    auto serialize(const void * data, size_type size)
     {
         // Increase vector size.
         if (m_size + size > m_output->size()) {
@@ -904,6 +1191,10 @@ protected:
 
         // Increase the size.
         m_size += size;
+
+#ifdef ZPP_SERIALIZER_FREESTANDING
+        return freestanding::error{error::success};
+#endif
     }
 
     /**
@@ -960,11 +1251,12 @@ public:
      * Saves items into the archive.
      */
     template <typename... Items>
-    void operator()(Items &&... items)
+    auto operator()(Items &&... items)
     {
         // Set the size to the vector size.
         adjust_size();
 
+#ifndef ZPP_SERIALIZER_FREESTANDING
         try {
             // Serialize the items.
             base::operator()(std::forward<Items>(items)...);
@@ -976,6 +1268,15 @@ public:
             fit_vector();
             throw;
         }
+#else
+        // Serialize the items.
+        auto result = base::operator()(std::forward<Items>(items)...);
+
+        // Fit the vector.
+        fit_vector();
+
+        return result;
+#endif
     }
 };
 
@@ -1045,12 +1346,16 @@ protected:
      * Serialize a single item - load it from the vector.
      */
     template <typename Item>
-    void serialize(Item && item)
+    auto serialize(Item && item)
     {
         // Verify that the vector is large enough to contain the item.
         if (m_size < (sizeof(item) + m_offset)) {
+#ifndef ZPP_SERIALIZER_FREESTANDING
             throw out_of_range("Input vector was not large enough to "
                                "contain the requested item");
+#else
+            return freestanding::error{error::out_of_range};
+#endif
         }
 
         // Fetch the item from the vector.
@@ -1061,17 +1366,25 @@ protected:
 
         // Increase the offset according to item size.
         m_offset += sizeof(item);
+
+#ifdef ZPP_SERIALIZER_FREESTANDING
+        return freestanding::error{error::success};
+#endif
     }
 
     /**
      * Serializes binary data.
      */
-    void serialize(void * data, size_type size)
+    auto serialize(void * data, size_type size)
     {
         // Verify that the vector is large enough to contain the data.
         if (m_size < (size + m_offset)) {
+#ifndef ZPP_SERIALIZER_FREESTANDING
             throw out_of_range("Input vector was not large enough to "
                                "contain the requested item");
+#else
+            return freestanding::error{error::out_of_range};
+#endif
         }
 
         // Fetch the binary data from the vector.
@@ -1080,6 +1393,10 @@ protected:
 
         // Increase the offset according to data size.
         m_offset += size;
+
+#ifdef ZPP_SERIALIZER_FREESTANDING
+        return freestanding::error{error::success};
+#endif
     }
 
 private:
@@ -1120,13 +1437,14 @@ public:
      * Load items from the archive.
      */
     template <typename... Items>
-    void operator()(Items &&... items)
+    auto operator()(Items &&... items)
     {
-        try {
-            // Update the input archive.
-            static_cast<memory_view_input_archive &>(*this) = {
-                m_input->data(), m_input->size()};
+        // Update the input archive.
+        static_cast<memory_view_input_archive &>(*this) = {
+            m_input->data(), m_input->size()};
 
+#ifndef ZPP_SERIALIZER_FREESTANDING
+        try {
             // Load the items.
             memory_view_input_archive::operator()(
                 std::forward<Items>(items)...);
@@ -1145,6 +1463,21 @@ public:
 
         // Reset to offset zero.
         reset();
+#else // ZPP_SERIALIZER_FREESTANDING
+      // Load the items.
+        if (auto result = memory_view_input_archive::operator()(
+                std::forward<Items>(items)...);
+            !result) {
+            // Erase the loaded elements.
+            m_input->erase(m_input->begin(),
+                           m_input->begin() + get_offset());
+
+            // Reset to offset zero.
+            reset();
+            return result;
+        }
+        return freestanding::error{error::success};
+#endif
     }
 
 private:
@@ -1154,6 +1487,7 @@ private:
     std::vector<unsigned char> * m_input{};
 };
 
+#ifndef ZPP_SERIALIZER_FREESTANDING
 /**
  * This class manages polymorphic type registration for serialization
  * process.
@@ -1322,7 +1656,8 @@ private:
      */
     std::unordered_map<std::string, id_type>
         m_type_information_to_serialization_id;
-}; // registry
+};     // registry
+#endif // ZPP_SERIALIZER_FREESTANDING
 
 /**
  * Serialize resizable containers, operates on loading (input) archives.
@@ -1346,8 +1681,9 @@ template <
     typename = void,
     typename = void,
     typename = void>
-void serialize(Archive & archive, Container & container)
+auto serialize(Archive & archive, Container & container)
 {
+#ifndef ZPP_SERIALIZER_FREESTANDING
     size_type size{};
 
     // Fetch the number of items to load.
@@ -1360,6 +1696,26 @@ void serialize(Archive & archive, Container & container)
     for (auto & item : container) {
         archive(item);
     }
+#else  // ZPP_SERIALIZER_FREESTANDING
+    size_type size{};
+
+    // Fetch the number of items to load.
+    if (auto result = archive(size); !result) {
+        return result;
+    }
+
+    // Resize the container to match the size.
+    container.resize(size);
+
+    // Serialize all the items.
+    for (auto & item : container) {
+        if (auto result = archive(item); !result) {
+            return result;
+        }
+    }
+
+    return freestanding::error{error::success};
+#endif // ZPP_SERIALIZER_FREESTANDING
 };
 
 /**
@@ -1385,15 +1741,32 @@ template <
     typename = void,
     typename = void,
     typename = void>
-void serialize(Archive & archive, const Container & container)
+auto serialize(Archive & archive, const Container & container)
 {
+#ifndef ZPP_SERIALIZER_FREESTANDING
     // Save the container size.
     archive(static_cast<size_type>(container.size()));
+#else
+    if (auto result = archive(static_cast<size_type>(container.size()));
+        !result) {
+        return result;
+    }
+#endif
 
     // Serialize all the items.
     for (auto & item : container) {
+#ifndef ZPP_SERIALIZER_FREESTANDING
         archive(item);
+#else
+        if (auto result = archive(item); !result) {
+            return result;
+        }
+#endif
     }
+
+#ifdef ZPP_SERIALIZER_FREESTANDING
+    return freestanding::error{error::success};
+#endif
 }
 
 /**
@@ -1421,24 +1794,34 @@ template <
     typename = void,
     typename = void,
     typename = void>
-void serialize(Archive & archive, Container & container)
+auto serialize(Archive & archive, Container & container)
 {
     size_type size{};
 
     // Fetch the number of items to load.
+#ifndef ZPP_SERIALIZER_FREESTANDING
     archive(size);
+#else
+    if (auto result = archive(size); !result) {
+        return result;
+    }
+#endif
 
     // Resize the container to match the size.
     container.resize(size);
 
     // If the size is zero, return.
     if (!size) {
+#ifndef ZPP_SERIALIZER_FREESTANDING
         return;
+#else
+        return freestanding::error{error::success};
+#endif
     }
 
     // Serialize the binary data.
-    archive(as_binary(std::addressof(container[0]),
-                      static_cast<size_type>(container.size())));
+    return archive(as_binary(std::addressof(container[0]),
+                             static_cast<size_type>(container.size())));
 };
 
 /**
@@ -1466,22 +1849,32 @@ template <
     typename = void,
     typename = void,
     typename = void>
-void serialize(Archive & archive, const Container & container)
+auto serialize(Archive & archive, const Container & container)
 {
     // The container size.
     auto size = static_cast<size_type>(container.size());
 
     // Save the container size.
+#ifndef ZPP_SERIALIZER_FREESTANDING
     archive(size);
+#else
+    if (auto result = archive(size); !result) {
+        return result;
+    }
+#endif
 
     // If the size is zero, return.
     if (!size) {
+#ifndef ZPP_SERIALIZER_FREESTANDING
         return;
+#else
+        return freestanding::error{error::success};
+#endif
     }
 
     // Serialize the binary data.
-    archive(as_binary(std::addressof(container[0]),
-                      static_cast<size_type>(container.size())));
+    return archive(as_binary(std::addressof(container[0]),
+                             static_cast<size_type>(container.size())));
 }
 
 /**
@@ -1497,12 +1890,18 @@ template <typename Archive,
           typename = typename Container::value_type,
           typename = typename Container::key_type,
           typename = typename Archive::loading>
-void serialize(Archive & archive, Container & container)
+auto serialize(Archive & archive, Container & container)
 {
     size_type size{};
 
     // Fetch the number of items to load.
+#ifndef ZPP_SERIALIZER_FREESTANDING
     archive(size);
+#else
+    if (auto result = archive(size); !result) {
+        return result;
+    }
+#endif
 
     // Serialize all the items.
     for (size_type i{}; i < size; ++i) {
@@ -1520,11 +1919,21 @@ void serialize(Archive & archive, Container & container)
             [](auto pointer) { access::destruct(*pointer); });
 
         // Serialize the object.
+#ifndef ZPP_SERIALIZER_FREESTANDING
         archive(*object);
+#else
+        if (auto result = archive(*object); !result) {
+            return result;
+        }
+#endif
 
         // Insert the item to the container.
         container.insert(std::move(*object));
     }
+
+#ifdef ZPP_SERIALIZER_FREESTANDING
+    return freestanding::error{error::success};
+#endif
 }
 
 /**
@@ -1540,15 +1949,32 @@ template <typename Archive,
           typename = typename Container::value_type,
           typename = typename Container::key_type,
           typename = typename Archive::saving>
-void serialize(Archive & archive, const Container & container)
+auto serialize(Archive & archive, const Container & container)
 {
     // Save the container size.
+#ifndef ZPP_SERIALIZER_FREESTANDING
     archive(static_cast<size_type>(container.size()));
+#else
+    if (auto result = archive(static_cast<size_type>(container.size()));
+        !result) {
+        return result;
+    }
+#endif
 
     // Serialize every item.
     for (auto & item : container) {
+#ifndef ZPP_SERIALIZER_FREESTANDING
         archive(item);
+#else
+        if (auto result = archive(item); !result) {
+            return result;
+        }
+#endif
     }
+
+#ifdef ZPP_SERIALIZER_FREESTANDING
+    return freestanding::error{error::success};
+#endif
 }
 
 /**
@@ -1559,12 +1985,22 @@ template <typename Archive,
           std::size_t size,
           typename...,
           typename = typename Archive::loading>
-void serialize(Archive & archive, Item (&array)[size])
+auto serialize(Archive & archive, Item (&array)[size])
 {
     // Serialize every item.
     for (auto & item : array) {
+#ifndef ZPP_SERIALIZER_FREESTANDING
         archive(item);
+#else
+        if (auto result = archive(item); !result) {
+            return result;
+        }
+#endif
     }
+
+#ifdef ZPP_SERIALIZER_FREESTANDING
+    return freestanding::error{error::success};
+#endif
 }
 
 /**
@@ -1575,12 +2011,22 @@ template <typename Archive,
           std::size_t size,
           typename...,
           typename = typename Archive::saving>
-void serialize(Archive & archive, const Item (&array)[size])
+auto serialize(Archive & archive, const Item (&array)[size])
 {
     // Serialize every item.
     for (auto & item : array) {
+#ifndef ZPP_SERIALIZER_FREESTANDING
         archive(item);
+#else
+        if (auto result = archive(item); !result) {
+            return result;
+        }
+#endif
     }
+
+#ifdef ZPP_SERIALIZER_FREESTANDING
+    return freestanding::error{error::success};
+#endif
 }
 
 /**
@@ -1591,12 +2037,22 @@ template <typename Archive,
           std::size_t size,
           typename...,
           typename = typename Archive::loading>
-void serialize(Archive & archive, std::array<Item, size> & array)
+auto serialize(Archive & archive, std::array<Item, size> & array)
 {
     // Serialize every item.
     for (auto & item : array) {
+#ifndef ZPP_SERIALIZER_FREESTANDING
         archive(item);
+#else
+        if (auto result = archive(item); !result) {
+            return result;
+        }
+#endif
     }
+
+#ifdef ZPP_SERIALIZER_FREESTANDING
+    return freestanding::error{error::success};
+#endif
 }
 
 /**
@@ -1607,12 +2063,22 @@ template <typename Archive,
           std::size_t size,
           typename...,
           typename = typename Archive::saving>
-void serialize(Archive & archive, const std::array<Item, size> & array)
+auto serialize(Archive & archive, const std::array<Item, size> & array)
 {
     // Serialize every item.
     for (auto & item : array) {
+#ifndef ZPP_SERIALIZER_FREESTANDING
         archive(item);
+#else
+        if (auto result = archive(item); !result) {
+            return result;
+        }
+#endif
     }
+
+#ifdef ZPP_SERIALIZER_FREESTANDING
+    return freestanding::error{error::success};
+#endif
 }
 
 /**
@@ -1623,10 +2089,10 @@ template <typename Archive,
           typename Second,
           typename...,
           typename = typename Archive::loading>
-void serialize(Archive & archive, std::pair<First, Second> & pair)
+auto serialize(Archive & archive, std::pair<First, Second> & pair)
 {
     // Serialize first, then second.
-    archive(pair.first, pair.second);
+    return archive(pair.first, pair.second);
 }
 
 /**
@@ -1637,10 +2103,10 @@ template <typename Archive,
           typename Second,
           typename...,
           typename = typename Archive::saving>
-void serialize(Archive & archive, const std::pair<First, Second> & pair)
+auto serialize(Archive & archive, const std::pair<First, Second> & pair)
 {
     // Serialize first, then second.
-    archive(pair.first, pair.second);
+    return archive(pair.first, pair.second);
 }
 
 /**
@@ -1649,10 +2115,10 @@ void serialize(Archive & archive, const std::pair<First, Second> & pair)
 template <typename Archive,
           typename... TupleItems,
           typename = typename Archive::loading>
-void serialize(Archive & archive, std::tuple<TupleItems...> & tuple)
+auto serialize(Archive & archive, std::tuple<TupleItems...> & tuple)
 {
     // Delegate to a helper function with an index sequence.
-    serialize(
+    return serialize(
         archive, tuple, std::make_index_sequence<sizeof...(TupleItems)>());
 }
 
@@ -1662,10 +2128,10 @@ void serialize(Archive & archive, std::tuple<TupleItems...> & tuple)
 template <typename Archive,
           typename... TupleItems,
           typename = typename Archive::saving>
-void serialize(Archive & archive, const std::tuple<TupleItems...> & tuple)
+auto serialize(Archive & archive, const std::tuple<TupleItems...> & tuple)
 {
     // Delegate to a helper function with an index sequence.
-    serialize(
+    return serialize(
         archive, tuple, std::make_index_sequence<sizeof...(TupleItems)>());
 }
 
@@ -1678,11 +2144,11 @@ template <typename Archive,
           typename... TupleItems,
           std::size_t... Indices,
           typename = typename Archive::loading>
-void serialize(Archive & archive,
+auto serialize(Archive & archive,
                std::tuple<TupleItems...> & tuple,
                std::index_sequence<Indices...>)
 {
-    archive(std::get<Indices>(tuple)...);
+    return archive(std::get<Indices>(tuple)...);
 }
 
 /**
@@ -1694,11 +2160,11 @@ template <typename Archive,
           typename... TupleItems,
           std::size_t... Indices,
           typename = typename Archive::saving>
-void serialize(Archive & archive,
+auto serialize(Archive & archive,
                const std::tuple<TupleItems...> & tuple,
                std::index_sequence<Indices...>)
 {
-    archive(std::get<Indices>(tuple)...);
+    return archive(std::get<Indices>(tuple)...);
 }
 
 #if __cplusplus >= 201703L
@@ -1709,7 +2175,7 @@ template <typename Archive,
           typename Type,
           typename...,
           typename = typename Archive::loading>
-void serialize(Archive & archive, std::optional<Type> & optional)
+auto serialize(Archive & archive, std::optional<Type> & optional)
 {
     // Load whether has value.
     bool has_value{};
@@ -1718,7 +2184,11 @@ void serialize(Archive & archive, std::optional<Type> & optional)
     // If does not have a value.
     if (!has_value) {
         optional = std::nullopt;
+#ifndef ZPP_SERIALIZER_FREESTANDING
         return;
+#else
+        return freestanding::error{error::success};
+#endif
     }
 
     // If the type is default constructible.
@@ -1729,7 +2199,13 @@ void serialize(Archive & archive, std::optional<Type> & optional)
         }
 
         // Load the value.
+#ifndef ZPP_SERIALIZER_FREESTANDING
         archive(*optional);
+#else
+        if (auto result = archive(*optional); !result) {
+            return result;
+        }
+#endif
     } else {
         // The object storage.
         std::aligned_storage_t<sizeof(Type), alignof(Type)> storage;
@@ -1740,11 +2216,21 @@ void serialize(Archive & archive, std::optional<Type> & optional)
             [](auto pointer) { access::destruct(*pointer); });
 
         // Load the object.
+#ifndef ZPP_SERIALIZER_FREESTANDING
         archive(*object);
+#else
+        if (auto result = archive(*optional); !result) {
+            return result;
+        }
+#endif
 
         // Assign the loaded object.
         optional = std::move(*object);
     }
+
+#ifdef ZPP_SERIALIZER_FREESTANDING
+    return freestanding::error{error::success};
+#endif
 }
 
 /**
@@ -1754,16 +2240,16 @@ template <typename Archive,
           typename Type,
           typename...,
           typename = typename Archive::saving>
-void serialize(Archive & archive, const std::optional<Type> & optional)
+auto serialize(Archive & archive, const std::optional<Type> & optional)
 {
     // Save has value.
     bool has_value = optional.has_value();
 
     // If has value, save it.
     if (has_value) {
-        archive(has_value, *optional);
+        return archive(has_value, *optional);
     } else {
-        archive(has_value);
+        return archive(has_value);
     }
 }
 
@@ -1773,7 +2259,7 @@ void serialize(Archive & archive, const std::optional<Type> & optional)
 template <typename Archive,
           typename... Types,
           typename = typename Archive::loading>
-void serialize(Archive & archive, std::variant<Types...> & variant)
+auto serialize(Archive & archive, std::variant<Types...> & variant)
 {
     // Test for maximum number of types.
     static_assert(sizeof...(Types) < 0xff, "Max variant types reached.");
@@ -1786,7 +2272,11 @@ void serialize(Archive & archive, std::variant<Types...> & variant)
 
     // Check that loaded index is inside bounds.
     if (index >= sizeof...(Types)) {
+#ifndef ZPP_SERIALIZER_FREESTANDING
         throw variant_index_out_of_range("Variant index out of range");
+#else
+        return freestanding::error{error::out_of_range};
+#endif
     }
 
     // The variant type.
@@ -1807,7 +2297,7 @@ void serialize(Archive & archive, std::variant<Types...> & variant)
             }
 
             // Load the value.
-            archive(*std::get_if<Types>(&variant));
+            return archive(*std::get_if<Types>(&variant));
         } else {
             // The object storage.
             std::aligned_storage_t<sizeof(Types), alignof(Types)> storage;
@@ -1818,7 +2308,13 @@ void serialize(Archive & archive, std::variant<Types...> & variant)
                 [](auto pointer) { access::destruct(*pointer); });
 
             // Load the object.
+#ifndef ZPP_SERIALIZER_FREESTANDING
             archive(*object);
+#else
+            if (auto result = archive(*object); !result) {
+                return result;
+            }
+#endif
 
             // Assign the loaded object.
             variant = std::move(*object);
@@ -1826,7 +2322,7 @@ void serialize(Archive & archive, std::variant<Types...> & variant)
     }...};
 
     // Execute the appropriate loader.
-    loaders[index](archive, variant);
+    return loaders[index](archive, variant);
 }
 
 /**
@@ -1835,7 +2331,7 @@ void serialize(Archive & archive, std::variant<Types...> & variant)
 template <typename Archive,
           typename... Types,
           typename = typename Archive::saving>
-void serialize(Archive & archive, const std::variant<Types...> & variant)
+auto serialize(Archive & archive, const std::variant<Types...> & variant)
 {
     // Test for maximum number of types.
     static_assert(sizeof...(Types) < 0xff, "Max variant types reached.");
@@ -1845,16 +2341,22 @@ void serialize(Archive & archive, const std::variant<Types...> & variant)
 
     // Disallow serializations of valueless variant.
     if (std::variant_npos == variant_index) {
+#ifndef ZPP_SERIALIZER_FREESTANDING
         throw attempt_to_serialize_valueless_variant(
             "Cannot serialize a valueless variant.");
+#else
+        return freestanding::error{error::variant_is_valueless};
+#endif
     }
 
     // The index to save.
     auto index = static_cast<unsigned char>(variant_index & 0xff);
 
     // Save the variant object.
-    std::visit(
-        [index, &archive](auto & object) { archive(index, object); },
+    return std::visit(
+        [index, &archive](auto & object) {
+            return archive(index, object);
+        },
         variant);
 }
 #endif
@@ -1869,16 +2371,26 @@ template <typename Archive,
           typename =
               std::enable_if_t<!std::is_base_of<polymorphic, Type>::value>,
           typename = typename Archive::loading>
-void serialize(Archive & archive, std::unique_ptr<Type> & object)
+auto serialize(Archive & archive, std::unique_ptr<Type> & object)
 {
     // Construct a new object.
     auto loaded_object = access::make_unique<Type>();
 
     // Serialize the object.
+#ifndef ZPP_SERIALIZER_FREESTANDING
     archive(*loaded_object);
+#else
+    if (auto result = archive(*loaded_object); !result) {
+        return result;
+    }
+#endif
 
     // Transfer the object.
     object.reset(loaded_object.release());
+
+#ifdef ZPP_SERIALIZER_FREESTANDING
+    return freestanding::error{error::success};
+#endif
 }
 
 /**
@@ -1891,18 +2403,23 @@ template <typename Archive,
           typename =
               std::enable_if_t<!std::is_base_of<polymorphic, Type>::value>,
           typename = typename Archive::saving>
-void serialize(Archive & archive, const std::unique_ptr<Type> & object)
+auto serialize(Archive & archive, const std::unique_ptr<Type> & object)
 {
     // Prevent serialization of null pointers.
     if (nullptr == object) {
+#ifndef ZPP_SERIALIZER_FREESTANDING
         throw attempt_to_serialize_null_pointer_error(
             "Attempt to serialize null pointer.");
+#else
+        return freestanding::error{error::null_pointer_serialization};
+#endif
     }
 
     // Serialize the object.
-    archive(*object);
+    return archive(*object);
 }
 
+#ifndef ZPP_SERIALIZER_FREESTANDING
 /**
  * Serialize std::unique_ptr of polymorphic, in case of a loading (input)
  * archive.
@@ -1962,6 +2479,7 @@ void serialize(Archive & archive, const std::unique_ptr<Type> & object)
     // Serialize the object using the registry.
     registry_instance.serialize(archive, *object);
 }
+#endif // ZPP_SERIALIZER_FREESTANDING
 
 /**
  * Serialize std::shared_ptr of non polymorphic, in case of a loading
@@ -1973,16 +2491,26 @@ template <typename Archive,
           typename =
               std::enable_if_t<!std::is_base_of<polymorphic, Type>::value>,
           typename = typename Archive::loading>
-void serialize(Archive & archive, std::shared_ptr<Type> & object)
+auto serialize(Archive & archive, std::shared_ptr<Type> & object)
 {
     // Construct a new object.
     auto loaded_object = access::make_unique<Type>();
 
     // Serialize the object.
+#ifndef ZPP_SERIALIZER_FREESTANDING
     archive(*loaded_object);
+#else
+    if (auto result = archive(*loaded_object); !result) {
+        return result;
+    }
+#endif
 
     // Transfer the object.
     object.reset(loaded_object.release());
+
+#ifdef ZPP_SERIALIZER_FREESTANDING
+    return freestanding::error{error::success};
+#endif
 }
 
 /**
@@ -1995,18 +2523,23 @@ template <typename Archive,
           typename =
               std::enable_if_t<!std::is_base_of<polymorphic, Type>::value>,
           typename = typename Archive::saving>
-void serialize(Archive & archive, const std::shared_ptr<Type> & object)
+auto serialize(Archive & archive, const std::shared_ptr<Type> & object)
 {
     // Prevent serialization of null pointers.
     if (nullptr == object) {
+#ifndef ZPP_SERIALIZER_FREESTANDING
         throw attempt_to_serialize_null_pointer_error(
             "Attempt to serialize null pointer.");
+#else
+        return freestanding::error{error::null_pointer_serialization};
+#endif
     }
 
     // Serialize the object.
-    archive(*object);
+    return archive(*object);
 }
 
+#ifndef ZPP_SERIALIZER_FREESTANDING
 /**
  * Serialize std::shared_ptr of polymorphic, in case of a loading (input)
  * archive.
@@ -2290,6 +2823,7 @@ constexpr id_type make_id(const char (&name)[size])
     // Produce the first 8 bytes of the hash in little endian.
     return detail::swap_byte_order((std::uint64_t(h0) << 32) | h1);
 } // make_id
+#endif // ZPP_SERIALIZER_FREESTANDING
 
 } // namespace serializer
 } // namespace zpp
