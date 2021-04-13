@@ -801,7 +801,7 @@ public:
     /**
      * Constructs the binary wrapper from pointer and count of items.
      */
-    binary(Item * items, size_type count) : m_items(items), m_count(count)
+    binary(Item * items, std::size_t count) : m_items(items), m_count(count)
     {
     }
 
@@ -816,7 +816,7 @@ public:
     /**
      * Returns the size in bytes of the binary data.
      */
-    size_type size_in_bytes() const noexcept
+    std::size_t size_in_bytes() const noexcept
     {
         return m_count * sizeof(Item);
     }
@@ -824,7 +824,7 @@ public:
     /**
      * Returns the count of items in the binary wrapper.
      */
-    size_type count() const noexcept
+    std::size_t count() const noexcept
     {
         return m_count;
     }
@@ -838,7 +838,7 @@ private:
     /**
      * The number of items.
      */
-    size_type m_count{};
+    std::size_t m_count{};
 };
 
 /**
@@ -846,7 +846,7 @@ private:
  * Use only with care.
  */
 template <typename Item>
-binary<Item> as_binary(Item * item, size_type count)
+binary<Item> as_binary(Item * item, std::size_t count)
 {
     static_assert(std::is_trivially_copyable<Item>::value,
                   "Must be trivially copyable");
@@ -858,7 +858,7 @@ binary<Item> as_binary(Item * item, size_type count)
  * Allows serialization as binary data.
  * Use only with care.
  */
-inline binary<unsigned char> as_binary(void * data, size_type size)
+inline binary<unsigned char> as_binary(void * data, std::size_t size)
 {
     return {static_cast<unsigned char *>(data), size};
 }
@@ -867,7 +867,7 @@ inline binary<unsigned char> as_binary(void * data, size_type size)
  * Allows serialization as binary data.
  */
 inline binary<const unsigned char> as_binary(const void * data,
-                                             size_type size)
+                                             std::size_t size)
 {
     return {static_cast<const unsigned char *>(data), size};
 }
@@ -1177,7 +1177,7 @@ protected:
     /**
      * Serialize binary data - save it to the vector.
      */
-    auto serialize(const void * data, size_type size)
+    auto serialize(const void * data, std::size_t size)
     {
         // Increase vector size.
         if (m_size + size > m_output->size()) {
@@ -1375,7 +1375,7 @@ protected:
     /**
      * Serializes binary data.
      */
-    auto serialize(void * data, size_type size)
+    auto serialize(void * data, std::size_t size)
     {
         // Verify that the vector is large enough to contain the data.
         if (m_size < (size + m_offset)) {
@@ -1665,6 +1665,7 @@ private:
 template <
     typename Archive,
     typename Container,
+    typename SizeType = size_type,
     typename...,
     typename = decltype(std::declval<Container &>().size()),
     typename = decltype(std::declval<Container &>().begin()),
@@ -1684,7 +1685,7 @@ template <
 auto serialize(Archive & archive, Container & container)
 {
 #ifndef ZPP_SERIALIZER_FREESTANDING
-    size_type size{};
+    SizeType size{};
 
     // Fetch the number of items to load.
     archive(size);
@@ -1697,7 +1698,7 @@ auto serialize(Archive & archive, Container & container)
         archive(item);
     }
 #else  // ZPP_SERIALIZER_FREESTANDING
-    size_type size{};
+    SizeType size{};
 
     // Fetch the number of items to load.
     if (auto result = archive(size); !result) {
@@ -1724,6 +1725,7 @@ auto serialize(Archive & archive, Container & container)
 template <
     typename Archive,
     typename Container,
+    typename SizeType = size_type,
     typename...,
     typename = decltype(std::declval<Container &>().size()),
     typename = decltype(std::declval<Container &>().begin()),
@@ -1745,9 +1747,9 @@ auto serialize(Archive & archive, const Container & container)
 {
 #ifndef ZPP_SERIALIZER_FREESTANDING
     // Save the container size.
-    archive(static_cast<size_type>(container.size()));
+    archive(static_cast<SizeType>(container.size()));
 #else
-    if (auto result = archive(static_cast<size_type>(container.size()));
+    if (auto result = archive(static_cast<SizeType>(container.size()));
         !result) {
         return result;
     }
@@ -1776,6 +1778,7 @@ auto serialize(Archive & archive, const Container & container)
 template <
     typename Archive,
     typename Container,
+    typename SizeType = size_type,
     typename...,
     typename = decltype(std::declval<Container &>().size()),
     typename = decltype(std::declval<Container &>().begin()),
@@ -1796,7 +1799,7 @@ template <
     typename = void>
 auto serialize(Archive & archive, Container & container)
 {
-    size_type size{};
+    SizeType size{};
 
     // Fetch the number of items to load.
 #ifndef ZPP_SERIALIZER_FREESTANDING
@@ -1821,7 +1824,7 @@ auto serialize(Archive & archive, Container & container)
 
     // Serialize the binary data.
     return archive(as_binary(std::addressof(container[0]),
-                             static_cast<size_type>(container.size())));
+                             static_cast<SizeType>(container.size())));
 };
 
 /**
@@ -1831,6 +1834,7 @@ auto serialize(Archive & archive, Container & container)
 template <
     typename Archive,
     typename Container,
+    typename SizeType = size_type,
     typename...,
     typename = decltype(std::declval<Container &>().size()),
     typename = decltype(std::declval<Container &>().begin()),
@@ -1852,7 +1856,7 @@ template <
 auto serialize(Archive & archive, const Container & container)
 {
     // The container size.
-    auto size = static_cast<size_type>(container.size());
+    auto size = static_cast<SizeType>(container.size());
 
     // Save the container size.
 #ifndef ZPP_SERIALIZER_FREESTANDING
@@ -1874,7 +1878,7 @@ auto serialize(Archive & archive, const Container & container)
 
     // Serialize the binary data.
     return archive(as_binary(std::addressof(container[0]),
-                             static_cast<size_type>(container.size())));
+                             static_cast<SizeType>(container.size())));
 }
 
 /**
@@ -1883,6 +1887,7 @@ auto serialize(Archive & archive, const Container & container)
  */
 template <typename Archive,
           typename Container,
+          typename SizeType = size_type,
           typename...,
           typename = decltype(std::declval<Container &>().size()),
           typename = decltype(std::declval<Container &>().begin()),
@@ -1892,7 +1897,7 @@ template <typename Archive,
           typename = typename Archive::loading>
 auto serialize(Archive & archive, Container & container)
 {
-    size_type size{};
+    SizeType size{};
 
     // Fetch the number of items to load.
 #ifndef ZPP_SERIALIZER_FREESTANDING
@@ -1904,7 +1909,7 @@ auto serialize(Archive & archive, Container & container)
 #endif
 
     // Serialize all the items.
-    for (size_type i{}; i < size; ++i) {
+    for (SizeType i{}; i < size; ++i) {
         // Deduce the container item type.
         using item_type =
             detail::container_nonconst_value_type_t<Container>;
@@ -1942,6 +1947,7 @@ auto serialize(Archive & archive, Container & container)
  */
 template <typename Archive,
           typename Container,
+          typename SizeType = size_type,
           typename...,
           typename = decltype(std::declval<Container &>().size()),
           typename = decltype(std::declval<Container &>().begin()),
@@ -1953,9 +1959,9 @@ auto serialize(Archive & archive, const Container & container)
 {
     // Save the container size.
 #ifndef ZPP_SERIALIZER_FREESTANDING
-    archive(static_cast<size_type>(container.size()));
+    archive(static_cast<SizeType>(container.size()));
 #else
-    if (auto result = archive(static_cast<size_type>(container.size()));
+    if (auto result = archive(static_cast<SizeType>(container.size()));
         !result) {
         return result;
     }
@@ -2537,6 +2543,61 @@ auto serialize(Archive & archive, const std::shared_ptr<Type> & object)
 
     // Serialize the object.
     return archive(*object);
+}
+
+/**
+ * Represents a container object with specific
+ * size type requirements.
+ */
+template <typename SizeType, typename Container>
+class sized_container
+{
+public:
+    /**
+     * Must be class type.
+     */
+    static_assert(std::is_class<Container>::value,
+            "Container must be a class type.");
+
+    /**
+     * Must be unsigned integral type.
+     */
+    static_assert(std::is_unsigned<SizeType>::value,
+            "Size must be an unsigned integral type.");
+
+    /*
+     * Construct the sized container.
+     */
+    explicit sized_container(Container & container) :
+        container(container)
+    {
+    }
+
+    /**
+     * Call serialize directly with the size type parameter.
+     */
+    template <typename Archive, typename Self>
+    static auto serialize(Archive & archive, Self & self)
+    {
+        using zpp::serializer::serialize;
+        return serialize<Archive, Container, SizeType>(archive, self.container);
+    }
+
+    /**
+     * The wrapped container type.
+     */
+    Container & container;
+};
+
+/**
+ * Creates a wrapper object of sized_container to
+ * allow serialization with specific size type requirements.
+ */
+template <typename SizeType, typename Container>
+auto size_is(Container && container)
+{
+    return sized_container<SizeType,
+           typename std::remove_reference<Container>::type>(container);
 }
 
 #ifndef ZPP_SERIALIZER_FREESTANDING

@@ -116,6 +116,19 @@ std::vector<int> v = { 1, 2, 3, 4 };
 out(v);
 in(v);
 ```
+The reason why the default size type is of 4 bytes (i.e `std::uint32_t`) is that most programs
+almost never reach a case of a container being more than ~4 billion items, and it may be unjust to
+pay the price of 8 bytes size by default.
+
+* For specific size types that are not 4 bytes, use `zpp::serializer::size_is<SizeType>()`:
+```
+std::vector<int> v = { 1, 2, 3, 4 };
+out(zpp::serializer::size_is<std::uint16_t>(v));
+in(zpp::serializer::size_is<std::uint16_t>(v));
+```
+Make sure that the size type is large enough for the serialized object, otherwise less items
+will be serialized, according to conversion rules of unsigned types. Uncareful use may lead to
+erroneuos code.
 
 * On the reading end, one can use `memory_view_input_archive` that receives a pointer and size rather than
 a vector which requires ownership and memory allocation.
@@ -338,7 +351,6 @@ Error checking is done like so:
 
     std::cout << my_point.get_x() << ' ' << my_point.get_y() << '\n';
 ```
-
 
 A Python Version
 ----------------
