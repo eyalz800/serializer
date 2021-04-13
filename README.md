@@ -72,7 +72,8 @@ zpp::serializer::register_types<
 * Save and load objects into a vector of data, in this example we show polymorphic serialization which
 has an overhead of 8 bytes serialization id, per polymorphic object being serialized.
 ```cpp
-// The data of the objects we serialize.
+// The data of the objects we serialize, the vector will grow and shrink as we serialize
+// data to/from the vector.
 std::vector<unsigned char> data;
 
 // Turns an object into data.
@@ -130,8 +131,9 @@ Make sure that the size type is large enough for the serialized object, otherwis
 will be serialized, according to conversion rules of unsigned types. Uncareful use may lead to
 erroneuos code.
 
-* On the reading end, one can use `memory_view_input_archive` that receives a pointer and size rather than
-a vector which requires ownership and memory allocation.
+* You may use `memory_view_input_archive`/`memory_view_output_archive` that receives a view type or pointer and size rather than
+a vector which requires ownership and memory allocation. In contrary to the owning archives, the view types are not altered, and
+you should use the `offset()` function to determine the position of the processed input and output.
 
 * Serialization using argument dependent lookup is also possible:
 ```cpp

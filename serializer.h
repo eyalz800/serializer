@@ -1,5 +1,5 @@
-#ifndef __zpp_serializer_h__
-#define __zpp_serializer_h__
+#ifndef ZPP_SERIALIZER_H
+#define ZPP_SERIALIZER_H
 
 #include <algorithm>
 #include <array>
@@ -672,15 +672,14 @@ template <typename Type>
 class polymorphic_wrapper
 {
 public:
-    static_assert(std::is_base_of<polymorphic, Type>::value,
-                  "The given type is not derived from polymorphic");
-
     /**
      * Constructs from the given object to be serialized as polymorphic.
      */
     explicit polymorphic_wrapper(const Type & object) noexcept :
         m_object(object)
     {
+        static_assert(std::is_base_of<polymorphic, Type>::value,
+                      "The given type is not derived from polymorphic");
     }
 
     /**
@@ -1115,18 +1114,18 @@ private:
 
 /**
  * This archive serves as an output archive, which saves data into memory.
- * Every save operation appends data into the vector.
- * This archive serves as an optimization around vector, use
- * 'memory_output_archive' instead.
+ * Every save operation appends data into the vector or view type.
+ * This archive serves as an optimization and type erasure for the view
+ * type for polymorphic serialization.
  */
-class lazy_vector_memory_output_archive
-    : public archive<lazy_vector_memory_output_archive>
+class basic_memory_output_archive
+    : public archive<basic_memory_output_archive>
 {
 public:
     /**
      * The base archive.
      */
-    using base = archive<lazy_vector_memory_output_archive>;
+    using base = archive<basic_memory_output_archive>;
 
     /**
      * Declare base as friend.
@@ -1143,31 +1142,52 @@ protected:
      * Constructs a memory output archive, that outputs to the given
      * vector.
      */
-    explicit lazy_vector_memory_output_archive(
+    explicit basic_memory_output_archive(
         std::vector<unsigned char> & output) noexcept :
-        m_output(std::addressof(output))
+        m_output_vector(std::addressof(output))
     {
     }
 
     /**
-     * Serialize a single item - save it to the vector.
+     * Constructs a memory output archive, that outputs to the given
+     * view.
+     */
+    basic_memory_output_archive(unsigned char * data,
+                                std::size_t size) noexcept :
+        m_data(data),
+        m_capacity(size)
+    {
+    }
+
+    /**
+     * Serialize a single item - save its data.
      */
     template <typename Item>
     auto serialize(Item && item)
     {
-        // Increase vector size.
-        if (m_size + sizeof(item) > m_output->size()) {
-            m_output->resize((m_size + sizeof(item)) * 3 / 2);
+        // Check if we are about to go beyond the capacity.
+        if (m_offset + sizeof(item) > m_capacity) {
+            if (!m_output_vector) {
+#ifndef ZPP_SERIALIZER_FREESTANDING
+                throw out_of_range(
+                    "Serialization to view type archive is out of range.");
+#else
+                return freestanding::error{error::out_of_range};
+#endif
+            }
+            m_capacity = (m_capacity + sizeof(item)) * 3 / 2;
+            m_output_vector->resize(m_capacity);
+            m_data = m_output_vector->data();
         }
 
-        // Copy the data to the end of the vector.
+        // Copy the data to the end of the view.
         std::copy_n(
             reinterpret_cast<const unsigned char *>(std::addressof(item)),
             sizeof(item),
-            m_output->data() + m_size);
+            m_data + m_offset);
 
-        // Increase the size.
-        m_size += sizeof(item);
+        // Increase the offset.
+        m_offset += sizeof(item);
 
 #ifdef ZPP_SERIALIZER_FREESTANDING
         return freestanding::error{error::success};
@@ -1175,22 +1195,32 @@ protected:
     }
 
     /**
-     * Serialize bytes data - save it to the vector.
+     * Serialize bytes data - save its data.
      */
     auto serialize(const void * data, std::size_t size)
     {
-        // Increase vector size.
-        if (m_size + size > m_output->size()) {
-            m_output->resize((m_size + size) * 3 / 2);
+        // Check if we are about to go beyond the capacity.
+        if (m_offset + size > m_capacity) {
+            if (!m_output_vector) {
+#ifndef ZPP_SERIALIZER_FREESTANDING
+                throw out_of_range(
+                    "Serialization to view type archive is out of range.");
+#else
+                return freestanding::error{error::out_of_range};
+#endif
+            }
+            m_capacity = (m_capacity + size) * 3 / 2;
+            m_output_vector->resize(m_capacity);
+            m_data = m_output_vector->data();
         }
 
-        // Copy the data to the end of the vector.
+        // Copy the data to the end of the output.
         std::copy_n(static_cast<const unsigned char *>(data),
                     size,
-                    m_output->data() + m_size);
+                    m_data + m_offset);
 
-        // Increase the size.
-        m_size += size;
+        // Increase the offset.
+        m_offset += size;
 
 #ifdef ZPP_SERIALIZER_FREESTANDING
         return freestanding::error{error::success};
@@ -1202,48 +1232,106 @@ protected:
      */
     void fit_vector()
     {
-        m_output->resize(m_size);
+        m_output_vector->resize(m_offset);
     }
 
     /**
-     * Set the size to the vector size.
+     * Refresh the vector.
      */
-    void adjust_size()
+    void refresh_vector() noexcept
     {
-        m_size = m_output->size();
+        m_data = m_output_vector->data();
+        m_capacity = m_output_vector->size();
+        m_offset = m_capacity;
+    }
+
+    /**
+     * Returns the current offset.
+     */
+    void reset(std::size_t offset = {}) noexcept
+    {
+        m_offset = offset;
+    }
+
+    /**
+     * Returns the current offset.
+     */
+    std::size_t offset() const noexcept
+    {
+        return m_offset;
     }
 
 private:
     /**
-     * The output vector.
+     * The output vector, may be null in which case working with
+     * view type represented by data and size below.
      */
-    std::vector<unsigned char> * m_output{};
+    std::vector<unsigned char> * m_output_vector{};
 
     /**
-     * The vector size.
+     * Points to the data.
      */
-    std::size_t m_size{};
-}; // lazy_vector_memory_output_archive
+    unsigned char * m_data{};
+
+    /**
+     * The current capacity size of the data.
+     */
+    std::size_t m_capacity{};
+
+    /**
+     * The offset of the output data.
+     */
+    std::size_t m_offset{};
+}; // basic_memory_output_archive
 
 /**
  * This archive serves as an output archive, which saves data into memory.
- * Every save operation appends data into the vector.
+ * Every save operation appends data into a user provided view type.
  */
-class memory_output_archive : private lazy_vector_memory_output_archive
+class memory_view_output_archive : private basic_memory_output_archive
 {
 public:
     /**
      * The base archive.
      */
-    using base = lazy_vector_memory_output_archive;
+    using base = basic_memory_output_archive;
+
+    /**
+     * Returns the current offset of the view type.
+     */
+    using base::offset;
+
+    /**
+     * Constructing the view from pointer and size.
+     */
+    memory_view_output_archive(unsigned char * data,
+                               std::size_t size) noexcept :
+        basic_memory_output_archive(data, size)
+    {
+    }
 
     /**
      * Constructs a memory output archive, that outputs to the given
-     * vector.
+     * view type.
      */
-    explicit memory_output_archive(
-        std::vector<unsigned char> & output) noexcept :
-        lazy_vector_memory_output_archive(output)
+    template <typename View,
+              typename...,
+              typename ViewType = std::remove_reference_t<View>,
+              typename = decltype(std::declval<View &>().size()),
+              typename = decltype(std::declval<View &>().begin()),
+              typename = decltype(std::declval<View &>().end()),
+              typename = decltype(std::declval<View &>().data()),
+              typename = std::enable_if_t<
+                  std::is_trivially_destructible<ViewType>::value>,
+              typename = std::enable_if_t<
+                  std::is_same<typename ViewType::value_type,
+                               unsigned char>::value &&
+                  std::is_base_of<std::random_access_iterator_tag,
+                                  typename std::iterator_traits<
+                                      typename ViewType::iterator>::
+                                      iterator_category>::value>>
+    explicit memory_view_output_archive(View && view) noexcept :
+        memory_view_output_archive(view.data(), view.size())
     {
     }
 
@@ -1253,28 +1341,79 @@ public:
     template <typename... Items>
     auto operator()(Items &&... items)
     {
-        // Set the size to the vector size.
-        adjust_size();
+        // Save previous offset.
+        auto offset = this->offset();
 
 #ifndef ZPP_SERIALIZER_FREESTANDING
         try {
             // Serialize the items.
             base::operator()(std::forward<Items>(items)...);
-
-            // Fit the vector.
-            fit_vector();
         } catch (...) {
-            // Fit the vector.
-            fit_vector();
+            this->reset(offset);
             throw;
         }
 #else
         // Serialize the items.
         auto result = base::operator()(std::forward<Items>(items)...);
+        if (!result) {
+            this->reset(offset);
+        }
+        return result;
+#endif
+    }
+};
 
-        // Fit the vector.
+/**
+ * This archive serves as an output archive, which saves data into memory.
+ * Every save operation appends data into the vector.
+ */
+class memory_output_archive : private basic_memory_output_archive
+{
+public:
+    /**
+     * The base archive.
+     */
+    using base = basic_memory_output_archive;
+
+    /**
+     * Constructs a memory output archive, that outputs to the given
+     * vector.
+     */
+    explicit memory_output_archive(
+        std::vector<unsigned char> & output) noexcept :
+        basic_memory_output_archive(output)
+    {
+    }
+
+    /**
+     * Saves items into the archive.
+     */
+    template <typename... Items>
+    auto operator()(Items &&... items)
+    {
+        refresh_vector();
+
+        // The original offset.
+        auto offset = this->offset();
+
+#ifndef ZPP_SERIALIZER_FREESTANDING
+        // Serialize the items.
+        try {
+            base::operator()(std::forward<Items>(items)...);
+            fit_vector();
+        } catch (...) {
+            this->reset(offset);
+            throw;
+        }
+#else
+        // Serialize the items.
+        auto result = base::operator()(std::forward<Items>(items)...);
+        if (!result) {
+            this->reset(offset);
+            return result;
+        }
+
         fit_vector();
-
         return result;
 #endif
     }
@@ -1315,31 +1454,46 @@ public:
     }
 
     /**
-     * Construct a memory view input archive, that loads data from an array
-     * of given pointer and size.
+     * Constructs a memory view input  archive, that loads data from
+     * the given view type.
      */
-    memory_view_input_archive(const char * input,
-                              std::size_t size) noexcept :
-        m_input(reinterpret_cast<const unsigned char *>(input)),
-        m_size(size)
+    template <typename View,
+              typename...,
+              typename ViewType = std::remove_reference_t<View>,
+              typename = decltype(std::declval<View &>().size()),
+              typename = decltype(std::declval<View &>().begin()),
+              typename = decltype(std::declval<View &>().end()),
+              typename = decltype(std::declval<View &>().data()),
+              typename = std::enable_if_t<
+                  std::is_trivially_destructible<ViewType>::value>,
+              typename = std::enable_if_t<
+                  std::is_same<
+                      std::remove_const_t<typename ViewType::value_type>,
+                      unsigned char>::value &&
+                  std::is_base_of<std::random_access_iterator_tag,
+                                  typename std::iterator_traits<
+                                      typename ViewType::iterator>::
+                                      iterator_category>::value>>
+    explicit memory_view_input_archive(View && view) noexcept :
+        memory_view_input_archive(view.data(), view.size())
     {
+    }
+
+    /**
+     * Returns the current offset in the input data.
+     */
+    std::size_t offset() const noexcept
+    {
+        return m_offset;
     }
 
 protected:
     /**
      * Resets the serialization to offset zero.
      */
-    void reset() noexcept
+    void reset(std::size_t offset = {}) noexcept
     {
-        m_offset = {};
-    }
-
-    /**
-     * Returns the offset of the serialization.
-     */
-    std::size_t get_offset() const noexcept
-    {
-        return m_offset;
+        m_offset = offset;
     }
 
     /**
@@ -1425,6 +1579,16 @@ class memory_input_archive : private memory_view_input_archive
 {
 public:
     /**
+     * The base archive.
+     */
+    using base = memory_view_input_archive;
+
+    /**
+     * Returns the current offset in the data.
+     */
+    using base::offset;
+
+    /**
      * Construct a memory input archive from a vector.
      */
     memory_input_archive(std::vector<unsigned char> & input) :
@@ -1443,39 +1607,39 @@ public:
         static_cast<memory_view_input_archive &>(*this) = {
             m_input->data(), m_input->size()};
 
+        // Save the original offset.
+        auto offset = this->offset();
+
 #ifndef ZPP_SERIALIZER_FREESTANDING
         try {
             // Load the items.
             memory_view_input_archive::operator()(
                 std::forward<Items>(items)...);
         } catch (...) {
-            // Erase the loaded elements.
-            m_input->erase(m_input->begin(),
-                           m_input->begin() + get_offset());
-
-            // Reset to offset zero.
-            reset();
+            // Reset the offset back.
+            reset(offset);
             throw;
         }
-
-        // Erase the loaded elements.
-        m_input->erase(m_input->begin(), m_input->begin() + get_offset());
-
-        // Reset to offset zero.
-        reset();
 #else // ZPP_SERIALIZER_FREESTANDING
-      // Load the items.
+
+        // Load the items.
         if (auto result = memory_view_input_archive::operator()(
                 std::forward<Items>(items)...);
             !result) {
-            // Erase the loaded elements.
-            m_input->erase(m_input->begin(),
-                           m_input->begin() + get_offset());
-
-            // Reset to offset zero.
-            reset();
+            // Reset the offset back.
+            reset(offset);
             return result;
         }
+#endif
+
+        // Erase the loaded elements.
+        m_input->erase(m_input->begin(),
+                       m_input->begin() + this->offset());
+
+        // Reset to offset zero.
+        reset();
+
+#ifdef ZPP_SERIALIZER_FREESTANDING
         return freestanding::error{error::success};
 #endif
     }
@@ -1684,39 +1848,34 @@ template <
     typename = void>
 auto serialize(Archive & archive, Container & container)
 {
+    SizeType size{};
+
+    // Fetch the number of items to load.
 #ifndef ZPP_SERIALIZER_FREESTANDING
-    SizeType size{};
-
-    // Fetch the number of items to load.
     archive(size);
-
-    // Resize the container to match the size.
-    container.resize(size);
-
-    // Serialize all the items.
-    for (auto & item : container) {
-        archive(item);
-    }
-#else  // ZPP_SERIALIZER_FREESTANDING
-    SizeType size{};
-
-    // Fetch the number of items to load.
+#else
     if (auto result = archive(size); !result) {
         return result;
     }
+#endif
 
     // Resize the container to match the size.
     container.resize(size);
 
     // Serialize all the items.
     for (auto & item : container) {
+#ifndef ZPP_SERIALIZER_FREESTANDING
+        archive(item);
+#else
         if (auto result = archive(item); !result) {
             return result;
         }
+#endif
     }
 
+#ifdef ZPP_SERIALIZER_FREESTANDING
     return freestanding::error{error::success};
-#endif // ZPP_SERIALIZER_FREESTANDING
+#endif
 };
 
 /**
@@ -1798,35 +1957,24 @@ template <
     typename = void>
 auto serialize(Archive & archive, Container & container)
 {
+    SizeType size{};
+
+    // Fetch the number of items to load.
 #ifndef ZPP_SERIALIZER_FREESTANDING
-    SizeType size{};
-
-    // Fetch the number of items to load.
     archive(size);
-
-    // Check size.
-    if (size > container.size()) {
-        throw out_of_range("View type container out of range.");
-    }
-
-    // Resize the view container to match the size.
-    container = {container.data(), size};
-
-    // Serialize all the items.
-    for (auto & item : container) {
-        archive(item);
-    }
-#else  // ZPP_SERIALIZER_FREESTANDING
-    SizeType size{};
-
-    // Fetch the number of items to load.
+#else
     if (auto result = archive(size); !result) {
         return result;
     }
+#endif
 
     // Check size.
     if (size > container.size()) {
+#ifndef ZPP_SERIALIZER_FREESTANDING
+        throw out_of_range("View type container out of range.");
+#else
         return freestanding::error{error::out_of_range};
+#endif
     }
 
     // Resize the view container to match the size.
@@ -1834,14 +1982,19 @@ auto serialize(Archive & archive, Container & container)
 
     // Serialize all the items.
     for (auto & item : container) {
+#ifndef ZPP_SERIALIZER_FREESTANDING
+        archive(item);
+#else
         if (auto result = archive(item); !result) {
             return result;
         }
-    }
+#endif
 
+#ifdef ZPP_SERIALIZER_FREESTANDING
     return freestanding::error{error::success};
-#endif // ZPP_SERIALIZER_FREESTANDING
-};
+#endif
+    }
+}
 
 /**
  * Serialize resizable, continuous containers, of fundamental or
@@ -1897,7 +2050,7 @@ auto serialize(Archive & archive, Container & container)
     // Serialize the bytes data.
     return archive(as_bytes(std::addressof(container[0]),
                             static_cast<SizeType>(container.size())));
-};
+}
 
 /**
  * Serialize continuous containers, of fundamental or
@@ -1994,7 +2147,11 @@ auto serialize(Archive & archive, Container & container)
 
     // Check the size.
     if (size > container.size()) {
+#ifndef ZPP_SERIALIZER_FREESTANDING
         throw out_of_range("View type container out of range.");
+#else
+        return freestanding::error{error::out_of_range};
+#endif
     }
 
     // Resize the view container to match the size.
@@ -2012,7 +2169,7 @@ auto serialize(Archive & archive, Container & container)
     // Serialize the bytes data.
     return archive(as_bytes(std::addressof(container[0]),
                             static_cast<SizeType>(container.size())));
-};
+}
 
 /**
  * Serialize Associative and UnorderedAssociative containers, operates on
@@ -2318,7 +2475,13 @@ auto serialize(Archive & archive, std::optional<Type> & optional)
 {
     // Load whether has value.
     bool has_value{};
+#ifndef ZPP_SERIALIZER_FREESTANDING
     archive(has_value);
+#else
+    if (auto result = archive(has_value); !result) {
+        return result;
+    }
+#endif
 
     // If does not have a value.
     if (!has_value) {
@@ -2407,7 +2570,13 @@ auto serialize(Archive & archive, std::variant<Types...> & variant)
     unsigned char index{};
 
     // Load the index.
+#ifndef ZPP_SERIALIZER_FREESTANDING
     archive(index);
+#else
+    if (auto result = archive(index); !result) {
+        return result;
+    }
+#endif
 
     // Check that loaded index is inside bounds.
     if (index >= sizeof...(Types)) {
@@ -2731,7 +2900,7 @@ auto size_is(Container && container)
 {
     return sized_container<
         SizeType,
-        typename std::remove_reference<Container>::type>(container);
+        std::remove_reference_t<Container>>(container);
 }
 
 #ifndef ZPP_SERIALIZER_FREESTANDING
@@ -2824,9 +2993,8 @@ struct archive_sequence
 /**
  * The built in archives.
  */
-using builtin_archives =
-    archive_sequence<memory_view_input_archive,
-                     lazy_vector_memory_output_archive>;
+using builtin_archives = archive_sequence<memory_view_input_archive,
+                                          basic_memory_output_archive>;
 
 /**
  * Makes a meta pair of type and id.
@@ -3023,4 +3191,4 @@ constexpr id_type make_id(const char (&name)[size])
 } // namespace serializer
 } // namespace zpp
 
-#endif
+#endif // ZPP_SERIALIZER_H
