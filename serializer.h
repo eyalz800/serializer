@@ -1720,7 +1720,7 @@ auto serialize(Archive & archive, Container & container)
 };
 
 /**
- * Serialize resizable containers, operates on saving (output) archives.
+ * Serialize containers, operates on saving (output) archives.
  */
 template <
     typename Archive,
@@ -1730,7 +1730,6 @@ template <
     typename = decltype(std::declval<Container &>().size()),
     typename = decltype(std::declval<Container &>().begin()),
     typename = decltype(std::declval<Container &>().end()),
-    typename = decltype(std::declval<Container &>().resize(std::size_t())),
     typename = std::enable_if_t<
         std::is_class<typename Container::value_type>::value ||
         !std::is_base_of<
@@ -1739,6 +1738,7 @@ template <
                 typename Container::iterator>::iterator_category>::value ||
         !detail::has_data_member_function<Container>::value>,
     typename = typename Archive::saving,
+    typename = void,
     typename = void,
     typename = void,
     typename = void,
@@ -1828,7 +1828,7 @@ auto serialize(Archive & archive, Container & container)
 };
 
 /**
- * Serialize resizable, continuous containers, of fundamental or
+ * Serialize continuous containers, of fundamental or
  * enumeration types. Operates on saving (output) archives.
  */
 template <
@@ -1839,7 +1839,6 @@ template <
     typename = decltype(std::declval<Container &>().size()),
     typename = decltype(std::declval<Container &>().begin()),
     typename = decltype(std::declval<Container &>().end()),
-    typename = decltype(std::declval<Container &>().resize(std::size_t())),
     typename = decltype(std::declval<Container &>().data()),
     typename = std::enable_if_t<
         std::is_fundamental<typename Container::value_type>::value ||
@@ -1849,6 +1848,7 @@ template <
         typename std::iterator_traits<
             typename Container::iterator>::iterator_category>::value>,
     typename = typename Archive::saving,
+    typename = void,
     typename = void,
     typename = void,
     typename = void,
