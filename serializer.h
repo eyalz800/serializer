@@ -1297,11 +1297,6 @@ public:
     using base = basic_memory_output_archive;
 
     /**
-     * Returns the current offset of the view type.
-     */
-    using base::offset;
-
-    /**
      * Constructing the view from pointer and size.
      */
     memory_view_output_archive(unsigned char * data,
@@ -1361,6 +1356,16 @@ public:
         return result;
 #endif
     }
+
+    /**
+     * Returns the current offset in the data.
+     */
+    using base::offset;
+
+    /**
+     * Allow to reset offset for advanced use.
+     */
+    using base::reset;
 };
 
 /**
@@ -1417,6 +1422,16 @@ public:
         return result;
 #endif
     }
+
+    /**
+     * Returns the current offset in the data.
+     */
+    using base::offset;
+
+    /**
+     * Allow to reset offset for advanced use.
+     */
+    using base::reset;
 };
 
 /**
@@ -1487,15 +1502,15 @@ public:
         return m_offset;
     }
 
-protected:
     /**
-     * Resets the serialization to offset zero.
+     * Resets the serialization to offset, to allow advanced use.
      */
     void reset(std::size_t offset = {}) noexcept
     {
         m_offset = offset;
     }
 
+protected:
     /**
      * Serialize a single item - load it from the vector.
      */
@@ -1584,11 +1599,6 @@ public:
     using base = memory_view_input_archive;
 
     /**
-     * Returns the current offset in the data.
-     */
-    using base::offset;
-
-    /**
      * Construct a memory input archive from a vector.
      */
     memory_input_archive(std::vector<unsigned char> & input) :
@@ -1643,6 +1653,16 @@ public:
         return freestanding::error{error::success};
 #endif
     }
+
+    /**
+     * Returns the current offset in the data.
+     */
+    using base::offset;
+
+    /**
+     * Allow to reset offset for advanced use.
+     */
+    using base::reset;
 
 private:
     /**
@@ -1876,7 +1896,7 @@ auto serialize(Archive & archive, Container & container)
 #ifdef ZPP_SERIALIZER_FREESTANDING
     return freestanding::error{error::success};
 #endif
-};
+}
 
 /**
  * Serialize containers, operates on saving (output) archives.
