@@ -791,17 +791,17 @@ public:
 }; // access
 
 /**
- * Enables serialization of arbitrary binary data.
+ * Enables serialization of arbitrary byte data.
  * Use only with care.
  */
 template <typename Item>
-class binary
+class bytes
 {
 public:
     /**
-     * Constructs the binary wrapper from pointer and count of items.
+     * Constructs the bytes wrapper from pointer and count of items.
      */
-    binary(Item * items, std::size_t count) : m_items(items), m_count(count)
+    bytes(Item * items, std::size_t count) : m_items(items), m_count(count)
     {
     }
 
@@ -814,7 +814,7 @@ public:
     }
 
     /**
-     * Returns the size in bytes of the binary data.
+     * Returns the size in bytes of the bytes data.
      */
     std::size_t size_in_bytes() const noexcept
     {
@@ -822,7 +822,7 @@ public:
     }
 
     /**
-     * Returns the count of items in the binary wrapper.
+     * Returns the count of items in the bytes wrapper.
      */
     std::size_t count() const noexcept
     {
@@ -842,11 +842,11 @@ private:
 };
 
 /**
- * Allows serialization as binary data.
+ * Allows serialization as bytes data.
  * Use only with care.
  */
 template <typename Item>
-binary<Item> as_binary(Item * item, std::size_t count)
+bytes<Item> as_bytes(Item * item, std::size_t count)
 {
     static_assert(std::is_trivially_copyable<Item>::value,
                   "Must be trivially copyable");
@@ -855,19 +855,19 @@ binary<Item> as_binary(Item * item, std::size_t count)
 }
 
 /**
- * Allows serialization as binary data.
+ * Allows serialization as bytes data.
  * Use only with care.
  */
-inline binary<unsigned char> as_binary(void * data, std::size_t size)
+inline bytes<unsigned char> as_bytes(void * data, std::size_t size)
 {
     return {static_cast<unsigned char *>(data), size};
 }
 
 /**
- * Allows serialization as binary data.
+ * Allows serialization as bytes data.
  */
-inline binary<const unsigned char> as_binary(const void * data,
-                                             std::size_t size)
+inline bytes<const unsigned char> as_bytes(const void * data,
+                                           std::size_t size)
 {
     return {static_cast<const unsigned char *>(data), size};
 }
@@ -1095,10 +1095,10 @@ private:
     }
 
     /**
-     * Serialize binary data.
+     * Serialize bytes data.
      */
     template <typename T>
-    auto serialize_item(binary<T> && item)
+    auto serialize_item(bytes<T> && item)
     {
         return concrete_archive().serialize(item.data(),
                                             item.size_in_bytes());
@@ -1175,7 +1175,7 @@ protected:
     }
 
     /**
-     * Serialize binary data - save it to the vector.
+     * Serialize bytes data - save it to the vector.
      */
     auto serialize(const void * data, std::size_t size)
     {
@@ -1373,7 +1373,7 @@ protected:
     }
 
     /**
-     * Serializes binary data.
+     * Serializes bytes data.
      */
     auto serialize(void * data, std::size_t size)
     {
@@ -1387,7 +1387,7 @@ protected:
 #endif
         }
 
-        // Fetch the binary data from the vector.
+        // Fetch the bytes data from the vector.
         std::copy_n(
             m_input + m_offset, size, static_cast<unsigned char *>(data));
 
@@ -1772,6 +1772,78 @@ auto serialize(Archive & archive, const Container & container)
 }
 
 /**
+ * Serialize view containers, operates on loading (input) archives.
+ */
+template <
+    typename Archive,
+    typename Container,
+    typename SizeType = size_type,
+    typename...,
+    typename = decltype(std::declval<Container &>().size()),
+    typename = decltype(std::declval<Container &>().begin()),
+    typename = decltype(std::declval<Container &>().end()),
+    typename =
+        std::enable_if_t<std::is_trivially_destructible<Container>::value>,
+    typename = std::enable_if_t<
+        std::is_class<typename Container::value_type>::value ||
+        !std::is_base_of<
+            std::random_access_iterator_tag,
+            typename std::iterator_traits<
+                typename Container::iterator>::iterator_category>::value>,
+    typename = typename Archive::loading,
+    typename = void,
+    typename = void,
+    typename = void,
+    typename = void,
+    typename = void>
+auto serialize(Archive & archive, Container & container)
+{
+#ifndef ZPP_SERIALIZER_FREESTANDING
+    SizeType size{};
+
+    // Fetch the number of items to load.
+    archive(size);
+
+    // Check size.
+    if (size > container.size()) {
+        throw out_of_range("View type container out of range.");
+    }
+
+    // Resize the view container to match the size.
+    container = {container.data(), size};
+
+    // Serialize all the items.
+    for (auto & item : container) {
+        archive(item);
+    }
+#else  // ZPP_SERIALIZER_FREESTANDING
+    SizeType size{};
+
+    // Fetch the number of items to load.
+    if (auto result = archive(size); !result) {
+        return result;
+    }
+
+    // Check size.
+    if (size > container.size()) {
+        return freestanding::error{error::out_of_range};
+    }
+
+    // Resize the view container to match the size.
+    container = {container.data(), size};
+
+    // Serialize all the items.
+    for (auto & item : container) {
+        if (auto result = archive(item); !result) {
+            return result;
+        }
+    }
+
+    return freestanding::error{error::success};
+#endif // ZPP_SERIALIZER_FREESTANDING
+};
+
+/**
  * Serialize resizable, continuous containers, of fundamental or
  * enumeration types. Operates on loading (input) archives.
  */
@@ -1822,37 +1894,36 @@ auto serialize(Archive & archive, Container & container)
 #endif
     }
 
-    // Serialize the binary data.
-    return archive(as_binary(std::addressof(container[0]),
-                             static_cast<SizeType>(container.size())));
+    // Serialize the bytes data.
+    return archive(as_bytes(std::addressof(container[0]),
+                            static_cast<SizeType>(container.size())));
 };
 
 /**
  * Serialize continuous containers, of fundamental or
  * enumeration types. Operates on saving (output) archives.
  */
-template <
-    typename Archive,
-    typename Container,
-    typename SizeType = size_type,
-    typename...,
-    typename = decltype(std::declval<Container &>().size()),
-    typename = decltype(std::declval<Container &>().begin()),
-    typename = decltype(std::declval<Container &>().end()),
-    typename = decltype(std::declval<Container &>().data()),
-    typename = std::enable_if_t<
-        std::is_fundamental<typename Container::value_type>::value ||
-        std::is_enum<typename Container::value_type>::value>,
-    typename = std::enable_if_t<std::is_base_of<
-        std::random_access_iterator_tag,
-        typename std::iterator_traits<
-            typename Container::iterator>::iterator_category>::value>,
-    typename = typename Archive::saving,
-    typename = void,
-    typename = void,
-    typename = void,
-    typename = void,
-    typename = void>
+template <typename Archive,
+          typename Container,
+          typename SizeType = size_type,
+          typename...,
+          typename = decltype(std::declval<Container &>().size()),
+          typename = decltype(std::declval<Container &>().begin()),
+          typename = decltype(std::declval<Container &>().end()),
+          typename = decltype(std::declval<Container &>().data()),
+          typename = std::enable_if_t<
+              std::is_fundamental<typename Container::value_type>::value ||
+              std::is_enum<typename Container::value_type>::value>,
+          typename = std::enable_if_t<std::is_base_of<
+              std::random_access_iterator_tag,
+              typename std::iterator_traits<typename Container::iterator>::
+                  iterator_category>::value>,
+          typename = typename Archive::saving,
+          typename = void,
+          typename = void,
+          typename = void,
+          typename = void,
+          typename = void>
 auto serialize(Archive & archive, const Container & container)
 {
     // The container size.
@@ -1876,10 +1947,72 @@ auto serialize(Archive & archive, const Container & container)
 #endif
     }
 
-    // Serialize the binary data.
-    return archive(as_binary(std::addressof(container[0]),
-                             static_cast<SizeType>(container.size())));
+    // Serialize the bytes data.
+    return archive(as_bytes(std::addressof(container[0]),
+                            static_cast<SizeType>(container.size())));
 }
+
+/**
+ * Serialize continuous view containers, of fundamental or
+ * enumeration types. Operates on loading (input) archives.
+ */
+template <typename Archive,
+          typename Container,
+          typename SizeType = size_type,
+          typename...,
+          typename = decltype(std::declval<Container &>().size()),
+          typename = decltype(std::declval<Container &>().begin()),
+          typename = decltype(std::declval<Container &>().end()),
+          typename = decltype(std::declval<Container &>().data()),
+          typename = std::enable_if_t<
+              std::is_trivially_destructible<Container>::value>,
+          typename = std::enable_if_t<
+              std::is_fundamental<typename Container::value_type>::value ||
+              std::is_enum<typename Container::value_type>::value>,
+          typename = std::enable_if_t<std::is_base_of<
+              std::random_access_iterator_tag,
+              typename std::iterator_traits<typename Container::iterator>::
+                  iterator_category>::value>,
+          typename = typename Archive::loading,
+          typename = void,
+          typename = void,
+          typename = void,
+          typename = void,
+          typename = void>
+auto serialize(Archive & archive, Container & container)
+{
+    SizeType size{};
+
+    // Fetch the number of items to load.
+#ifndef ZPP_SERIALIZER_FREESTANDING
+    archive(size);
+#else
+    if (auto result = archive(size); !result) {
+        return result;
+    }
+#endif
+
+    // Check the size.
+    if (size > container.size()) {
+        throw out_of_range("View type container out of range.");
+    }
+
+    // Resize the view container to match the size.
+    container = {container.data(), size};
+
+    // If the size is zero, return.
+    if (!size) {
+#ifndef ZPP_SERIALIZER_FREESTANDING
+        return;
+#else
+        return freestanding::error{error::success};
+#endif
+    }
+
+    // Serialize the bytes data.
+    return archive(as_bytes(std::addressof(container[0]),
+                            static_cast<SizeType>(container.size())));
+};
 
 /**
  * Serialize Associative and UnorderedAssociative containers, operates on
@@ -2557,19 +2690,18 @@ public:
      * Must be class type.
      */
     static_assert(std::is_class<Container>::value,
-            "Container must be a class type.");
+                  "Container must be a class type.");
 
     /**
      * Must be unsigned integral type.
      */
     static_assert(std::is_unsigned<SizeType>::value,
-            "Size must be an unsigned integral type.");
+                  "Size must be an unsigned integral type.");
 
     /*
      * Construct the sized container.
      */
-    explicit sized_container(Container & container) :
-        container(container)
+    explicit sized_container(Container & container) : container(container)
     {
     }
 
@@ -2580,7 +2712,8 @@ public:
     static auto serialize(Archive & archive, Self & self)
     {
         using zpp::serializer::serialize;
-        return serialize<Archive, Container, SizeType>(archive, self.container);
+        return serialize<Archive, Container, SizeType>(archive,
+                                                       self.container);
     }
 
     /**
@@ -2596,8 +2729,9 @@ public:
 template <typename SizeType, typename Container>
 auto size_is(Container && container)
 {
-    return sized_container<SizeType,
-           typename std::remove_reference<Container>::type>(container);
+    return sized_container<
+        SizeType,
+        typename std::remove_reference<Container>::type>(container);
 }
 
 #ifndef ZPP_SERIALIZER_FREESTANDING
