@@ -2252,48 +2252,6 @@ auto serialize(Archive & archive, Container & container)
 }
 
 /**
- * Serialize Associative and UnorderedAssociative containers, operates on
- * saving (output) archives.
- */
-template <typename Archive,
-          typename Container,
-          typename SizeType = size_type,
-          typename...,
-          typename = decltype(std::declval<Container &>().size()),
-          typename = decltype(std::declval<Container &>().begin()),
-          typename = decltype(std::declval<Container &>().end()),
-          typename = typename Container::value_type,
-          typename = typename Container::key_type,
-          typename = typename Archive::saving>
-auto serialize(Archive & archive, const Container & container)
-{
-    // Save the container size.
-#ifndef ZPP_SERIALIZER_FREESTANDING
-    archive(static_cast<SizeType>(container.size()));
-#else
-    if (auto result = archive(static_cast<SizeType>(container.size()));
-        !result) {
-        return result;
-    }
-#endif
-
-    // Serialize every item.
-    for (auto & item : container) {
-#ifndef ZPP_SERIALIZER_FREESTANDING
-        archive(item);
-#else
-        if (auto result = archive(item); !result) {
-            return result;
-        }
-#endif
-    }
-
-#ifdef ZPP_SERIALIZER_FREESTANDING
-    return freestanding::error{error::success};
-#endif
-}
-
-/**
  * Serialize arrays, operates on loading (input) archives.
  */
 template <typename Archive,
