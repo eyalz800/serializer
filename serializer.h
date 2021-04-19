@@ -256,8 +256,8 @@ constexpr auto make_error_category(std::string_view name,
                                    Messages && messages)
 {
     // Create a category with the name and messages.
-    class category : public error_category,
-                     private std::remove_reference_t<Messages>
+    class category final : public error_category,
+                           private std::remove_reference_t<Messages>
     {
     public:
         constexpr category(std::string_view name,
@@ -2011,7 +2011,7 @@ auto serialize(Archive & archive, Container & container)
 #endif
 
 #ifdef ZPP_SERIALIZER_FREESTANDING
-    return freestanding::error{error::success};
+        return freestanding::error{error::success};
 #endif
     }
 }
@@ -2876,9 +2876,8 @@ public:
 template <typename SizeType, typename Container>
 auto size_is(Container && container)
 {
-    return sized_container<
-        SizeType,
-        std::remove_reference_t<Container>>(container);
+    return sized_container<SizeType, std::remove_reference_t<Container>>(
+        container);
 }
 
 #ifndef ZPP_SERIALIZER_FREESTANDING
