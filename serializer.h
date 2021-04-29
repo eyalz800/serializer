@@ -8,7 +8,6 @@
 #include <cstring>
 #include <initializer_list>
 #include <memory>
-#include <mutex>
 #include <new>
 #include <stdexcept>
 #include <string>
@@ -23,6 +22,7 @@
 #ifdef ZPP_SERIALIZER_FREESTANDING
 #include <string_view>
 #else
+#include <mutex>
 #include <shared_mutex>
 #include <unordered_map>
 #endif
