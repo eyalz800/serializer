@@ -1246,11 +1246,11 @@ protected:
     }
 
     /**
-     * Returns the current offset.
+     * Returns the data pointer.
      */
-    void reset(std::size_t offset = {}) noexcept
+    unsigned char * data() const noexcept
     {
-        m_offset = offset;
+        return m_data;
     }
 
     /**
@@ -1259,6 +1259,14 @@ protected:
     std::size_t offset() const noexcept
     {
         return m_offset;
+    }
+
+    /**
+     * Returns the current offset.
+     */
+    void reset(std::size_t offset = {}) noexcept
+    {
+        m_offset = offset;
     }
 
 private:
@@ -1358,6 +1366,11 @@ public:
     }
 
     /**
+     * Returns the data pointer.
+     */
+    using base::data;
+
+    /**
      * Returns the current offset in the data.
      */
     using base::offset;
@@ -1422,6 +1435,11 @@ public:
         return result;
 #endif
     }
+
+    /**
+     * Returns the data pointer.
+     */
+    using base::data;
 
     /**
      * Returns the current offset in the data.
@@ -1492,6 +1510,14 @@ public:
     explicit memory_view_input_archive(View && view) noexcept :
         memory_view_input_archive(view.data(), view.size())
     {
+    }
+
+    /**
+     * Returns the current offset in the input data.
+     */
+    const unsigned char * data() const noexcept
+    {
+        return m_input;
     }
 
     /**
@@ -1653,6 +1679,11 @@ public:
         return freestanding::error{error::success};
 #endif
     }
+
+    /**
+     * Returns the data pointer;
+     */
+    using base::data;
 
     /**
      * Returns the current offset in the data.
