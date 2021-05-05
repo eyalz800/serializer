@@ -2284,11 +2284,14 @@ auto serialize(Archive & archive, Container & container)
 
 /**
  * Serialize arrays, operates on loading (input) archives.
+ * This overload is for non fundamental non enumeration types.
  */
 template <typename Archive,
           typename Item,
           std::size_t size,
           typename...,
+          typename = std::enable_if_t<!std::is_fundamental<Item>::value &&
+                                      !std::is_enum<Item>::value>,
           typename = typename Archive::loading>
 auto serialize(Archive & archive, Item (&array)[size])
 {
@@ -2309,12 +2312,32 @@ auto serialize(Archive & archive, Item (&array)[size])
 }
 
 /**
- * Serialize arrays, operates on saving (output) archives.
+ * Serialize arrays, operates on loading (input) archives.
+ * This overload is for fundamental or enumeration types.
  */
 template <typename Archive,
           typename Item,
           std::size_t size,
           typename...,
+          typename = std::enable_if_t<std::is_fundamental<Item>::value ||
+                                      std::is_enum<Item>::value>,
+          typename = typename Archive::loading,
+          typename = void>
+auto serialize(Archive & archive, Item (&array)[size])
+{
+    return archive(as_bytes(array, size));
+}
+
+/**
+ * Serialize arrays, operates on saving (output) archives.
+ * This overload is for non fundamental non enumeration types.
+ */
+template <typename Archive,
+          typename Item,
+          std::size_t size,
+          typename...,
+          typename = std::enable_if_t<!std::is_fundamental<Item>::value &&
+                                      !std::is_enum<Item>::value>,
           typename = typename Archive::saving>
 auto serialize(Archive & archive, const Item (&array)[size])
 {
@@ -2335,12 +2358,32 @@ auto serialize(Archive & archive, const Item (&array)[size])
 }
 
 /**
- * Serialize std::array, operates on loading (input) archives.
+ * Serialize arrays, operates on saving (output) archives.
+ * This overload is for fundamental or enumeration types.
  */
 template <typename Archive,
           typename Item,
           std::size_t size,
           typename...,
+          typename = std::enable_if_t<std::is_fundamental<Item>::value ||
+                                      std::is_enum<Item>::value>,
+          typename = typename Archive::saving,
+    typename = void>
+auto serialize(Archive & archive, const Item (&array)[size])
+{
+    return archive(as_bytes(array, size));
+}
+
+/**
+ * Serialize std::array, operates on loading (input) archives.
+ * This overload is for non fundamental non enumeration types.
+ */
+template <typename Archive,
+          typename Item,
+          std::size_t size,
+          typename...,
+          typename = std::enable_if_t<!std::is_fundamental<Item>::value &&
+                                      !std::is_enum<Item>::value>,
           typename = typename Archive::loading>
 auto serialize(Archive & archive, std::array<Item, size> & array)
 {
@@ -2361,12 +2404,32 @@ auto serialize(Archive & archive, std::array<Item, size> & array)
 }
 
 /**
- * Serialize std::array, operates on saving (output) archives.
+ * Serialize std::array, operates on loading (input) archives.
+ * This overload is for fundamental or enumeration types.
  */
 template <typename Archive,
           typename Item,
           std::size_t size,
           typename...,
+          typename = std::enable_if_t<std::is_fundamental<Item>::value ||
+                                      std::is_enum<Item>::value>,
+          typename = typename Archive::loading,
+          typename = void>
+auto serialize(Archive & archive, std::array<Item, size> & array)
+{
+    return archive(as_bytes(std::addressof(array[0]), size));
+}
+
+/**
+ * Serialize std::array, operates on saving (output) archives.
+ * This overload is for non fundamental non enumeration types.
+ */
+template <typename Archive,
+          typename Item,
+          std::size_t size,
+          typename...,
+          typename = std::enable_if_t<!std::is_fundamental<Item>::value &&
+                                      !std::is_enum<Item>::value>,
           typename = typename Archive::saving>
 auto serialize(Archive & archive, const std::array<Item, size> & array)
 {
@@ -2384,6 +2447,23 @@ auto serialize(Archive & archive, const std::array<Item, size> & array)
 #ifdef ZPP_SERIALIZER_FREESTANDING
     return freestanding::error{error::success};
 #endif
+}
+
+/**
+ * Serialize std::array, operates on saving (output) archives.
+ * This overload is for fundamental or enumeration types.
+ */
+template <typename Archive,
+          typename Item,
+          std::size_t size,
+          typename...,
+          typename = std::enable_if_t<std::is_fundamental<Item>::value ||
+                                      std::is_enum<Item>::value>,
+          typename = typename Archive::saving,
+          typename = void>
+auto serialize(Archive & archive, const std::array<Item, size> & array)
+{
+    return archive(as_bytes(std::addressof(array[0]), size));
 }
 
 /**
