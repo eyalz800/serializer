@@ -310,7 +310,7 @@ static void foobar()
 }
 ```
 
-Feestanding Implementation
+Freestanding Implementation
 --------------------------
 The library also supports experimental freestanding mode, to allow running in an environment
 without exceptions and rtti.
