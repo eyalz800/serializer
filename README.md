@@ -1,6 +1,7 @@
 zpp serializer
 ==============
 A single header only standard C++ serialization framework.
+Before you continue - if you are using C++20, you should probably use [zpp_bits](https://github.com/eyalz800/zpp_bits) instead.
 
 Abstract
 --------
